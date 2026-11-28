@@ -39,6 +39,8 @@ export enum ActionType {
   IMPORT_SEMANTIC_CHECK = "import_semantic_check",
   /** Nút 1.11 phần reduce: kiểm chéo giữa các section trên Spine gọn của cả tài liệu — chỉ ra cờ vàng. */
   IMPORT_CROSS_CHECK = "import_cross_check",
+  /** FLF-453 (business-flow §3.1.2): vòng rà soát phần có sẵn chế độ 3/4, trước Luồng 2 — chỉ ra cờ vàng (kể cả nghi sai nghiệp vụ). */
+  IMPORT_REVIEW_EXISTING = "import_review_existing",
   /** C-2 (nút 3.2): làm rõ CR, trả câu hỏi hoặc đích (entity path, từ khoá) cho C-3. */
   CR_CLARIFY = "cr_clarify",
   /** C-4 (nút 3.6): kết luận edit | comment | not_related cho từng vị trí + đề xuất text/op. */
@@ -47,6 +49,8 @@ export enum ActionType {
   CR_CONSISTENCY = "cr_consistency",
   /** Mode 1 v3 phase 7: đọc ảnh người dùng đính kèm CR làm tài liệu bổ sung (Gemini vision) ⇒ chữ + mô tả. */
   CR_MATERIAL_IMAGE = "cr_material_image",
+  /** FLF-492 (M4-02): viết gọn mô tả các dòng CR trong Record of Changes khi phát hành (tuỳ chọn, mặc định tắt). */
+  CR_RECORD_SUMMARY = "cr_record_summary",
 
   // ─── Knowledge RAG (FLF-267) ───
   /** Trả lời câu hỏi trong chat chỉ từ chunk tri thức truy hồi được (K1..Kn), mỗi ý kèm trích dẫn. */
@@ -86,10 +90,12 @@ export const SKILL_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, string>>>
   [ActionType.IMPORT_EXTRACT_DIAGRAM]: "import-extract-diagram",
   [ActionType.IMPORT_SEMANTIC_CHECK]: "import-semantic-check",
   [ActionType.IMPORT_CROSS_CHECK]: "import-cross-check",
+  [ActionType.IMPORT_REVIEW_EXISTING]: "import-review-existing",
   [ActionType.CR_CLARIFY]: "cr-clarify",
   [ActionType.CR_PROPOSE]: "cr-propose",
   [ActionType.CR_CONSISTENCY]: "cr-consistency",
   [ActionType.CR_MATERIAL_IMAGE]: "cr-material-image",
+  [ActionType.CR_RECORD_SUMMARY]: "cr-record-summary",
   [ActionType.KNOWLEDGE_ANSWER]: "knowledge-answer",
   [ActionType.EXTRACT_REQUIREMENTS]: "extract-requirements",
   [ActionType.SKELETON_GENERIC_NAMES]: "skeleton-generic-names",

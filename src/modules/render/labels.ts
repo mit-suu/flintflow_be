@@ -32,6 +32,11 @@ export const VI_LABELS: Readonly<Record<string, string>> = {
   Kind: "Loại",
   Description: "Mô tả",
   Actors: "Tác nhân",
+  // FLF-468 (lát D, ChoViet #11): cột thiếu bản dịch khiến bảng tiếng Việt (mode 1, không qua `VI_FPT_LABELS`) lẫn chữ
+  // Anh — "Rule" (§5.1 Quy tắc nghiệp vụ), "Context" (§5.3 bảng thông báo, cả đoạn dựng lại ngoài đoạn — `trailing`).
+  // Không thêm "Role" / "Actor" ở đây: hai nhãn đó chỉ dành cho mẫu FPT (`VI_FPT_LABELS`), mode 1 giữ tiếng Anh như cũ.
+  Rule: "Quy tắc",
+  Context: "Ngữ cảnh",
   Screen: "Màn hình",
   Type: "Kiểu",
   Feature: "Chức năng",
@@ -110,8 +115,6 @@ export const VI_FPT_LABELS: Readonly<Record<string, string>> = {
   Actor: "Tác nhân",
   "#": "STT",
   "N/A": "Không có",
-  // P07: cột ngữ cảnh của bảng 5.3
-  Context: "Ngữ cảnh",
   // Khung §3.x.y mẫu FPT
   "Function trigger": "Kích hoạt chức năng",
   "Function description": "Mô tả chức năng",
@@ -193,8 +196,98 @@ export const VI_ENUM_LABELS = {
 
 export type EnumTable = keyof typeof VI_ENUM_LABELS
 
-export const enumLabel = (language: string | undefined, table: EnumTable, value: string): string =>
-  isVietnamese(language) ? ((VI_ENUM_LABELS[table] as Readonly<Record<string, string>>)[value] ?? value) : value
+/**
+ * FLF-479 (12a): bảng tiếng Anh cho enum in thô trong tài liệu tiếng Anh (`risk`, `open_question`, `date_format`…).
+ * Chỉ hai bảng này đọc không được trực tiếp; `actor_kind` ("Stripe (system)" đang cố ý viết thường), `priority`,
+ * `permission_action` đã đọc được, KHÔNG thêm vào đây (đổi sẽ vỡ golden test không cần thiết).
+ */
+export const EN_ENUM_LABELS = {
+  common_category: {
+    pagination: "Pagination",
+    date_format: "Date format",
+    error_handling: "Error handling",
+    audit: "Audit",
+    session: "Session",
+    security: "Security",
+    logging: "Logging",
+    validation: "Validation",
+    notification: "Notification",
+    localization: "Localization",
+    accessibility: "Accessibility"
+  } as Readonly<Record<string, string>>,
+  other_kind: {
+    risk: "Risk",
+    assumption: "Assumption",
+    open_question: "Open question",
+    technical_risk: "Technical risk"
+  } satisfies Record<OtherRequirementKind, string>
+} as const
+
+/** Nhãn enum theo ngôn ngữ — vi tra `VI_ENUM_LABELS`, en tra `EN_ENUM_LABELS`; không có bảng / không có giá trị ⇒ giữ nguyên như trước. */
+export const enumLabel = (language: string | undefined, table: EnumTable, value: string): string => {
+  if (isVietnamese(language)) return (VI_ENUM_LABELS[table] as Readonly<Record<string, string>>)[value] ?? value
+  const enTable = (EN_ENUM_LABELS as Partial<Record<EnumTable, Readonly<Record<string, string>>>>)[table]
+  return enTable?.[value] ?? value
+}
+
+// ─── loại yêu cầu chung (common_requirements[].category) ──
+
+/** Khoá loại yêu cầu chung FlintFlow nhận biết (`VI_ENUM_LABELS.common_category`). Spine vẫn cho chữ tự do. */
+export const COMMON_CATEGORIES: readonly string[] = Object.keys(VI_ENUM_LABELS.common_category)
+
+/** Loại thuộc mục "Yêu cầu bảo mật chung" (`slot:security`) / "Yêu cầu bản địa hoá" (`slot:localization`). */
+export const SECURITY_CATEGORIES: readonly string[] = ["security", "session", "audit"]
+export const LOCALIZATION_CATEGORIES: readonly string[] = ["localization", "date_format"]
+
+const foldCategory = (s: string): string =>
+  s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[đĐ]/g, "d").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+
+/** Từ đồng nghĩa (đã bỏ dấu, chữ thường) ⇒ khoá; nhãn tiếng Việt và chính khoá được thêm tự động bên dưới. */
+const COMMON_CATEGORY_SYNONYMS: Readonly<Record<string, readonly string[]>> = {
+  security: ["security", "security requirements", "an toan", "an toan thong tin", "an ninh", "bao mat thong tin", "yeu cau bao mat"],
+  session: ["session", "sessions", "session management", "phien", "quan ly phien"],
+  audit: ["audit", "audit log", "audit trail", "auditing", "kiem toan", "nhat ky kiem toan"],
+  logging: ["logging", "log", "logs", "ghi log", "nhat ky"],
+  pagination: ["pagination", "paging"],
+  date_format: ["date format", "date time format", "datetime format", "date and time format", "dinh dang ngay", "dinh dang ngay thang"],
+  error_handling: ["error handling", "errors", "error", "loi"],
+  validation: ["validation", "data validation", "input validation", "xac thuc du lieu", "kiem tra dau vao"],
+  notification: ["notification", "notifications"],
+  localization: ["localization", "localisation", "internationalization", "internationalisation", "i18n", "l10n", "ban dia hoa", "da ngon ngu", "ngon ngu"],
+  accessibility: ["accessibility", "a11y", "tro nang"]
+}
+
+const COMMON_CATEGORY_INDEX: ReadonlyMap<string, string> = new Map(
+  COMMON_CATEGORIES.flatMap((key) => [
+    [foldCategory(key), key] as const,
+    [foldCategory(VI_ENUM_LABELS.common_category[key]), key] as const,
+    ...(COMMON_CATEGORY_SYNONYMS[key] ?? []).map((alias) => [foldCategory(alias), key] as const)
+  ])
+)
+
+/**
+ * Bug #3 (FLF-447 test): loại yêu cầu chung ghi tự do ("Bảo mật", "Security", "BẢO MẬT") ⇒ khoá FlintFlow (`security`). So sau
+ * khi bỏ dấu, không phân biệt hoa thường: khoá, nhãn tiếng Việt (`VI_ENUM_LABELS.common_category`) và từ đồng nghĩa tiếng
+ * Anh / Việt. Không nhận ra ⇒ `null` (bên gọi giữ chữ gốc). Dùng lúc import (lưu khoá) và lúc render / kiểm nội dung mục (dữ
+ * liệu cũ còn chữ tự do vẫn vào đúng mục, không cần migrate).
+ */
+export const normalizeCommonCategory = (category: string | null | undefined): string | null =>
+  category ? (COMMON_CATEGORY_INDEX.get(foldCategory(category)) ?? null) : null
+
+/** Loại của `category` (đã chuẩn hoá) thuộc nhóm `keys` — chữ tự do không nhận ra so nguyên văn. */
+export const commonCategoryIn = (category: string, keys: readonly string[]): boolean =>
+  keys.includes(normalizeCommonCategory(category) ?? category)
+
+/**
+ * Nhãn in của loại yêu cầu chung theo ngôn ngữ tài liệu: khoá FlintFlow ⇒ nhãn tiếng Việt / chữ hoa đầu tiếng Anh
+ * ("date_format" ⇒ "Date format"); chữ tự do (của file) ⇒ in nguyên.
+ */
+export const commonCategoryLabel = (language: string | undefined, category: string): string => {
+  if (!COMMON_CATEGORIES.includes(category)) return category
+  if (isVietnamese(language)) return VI_ENUM_LABELS.common_category[category] ?? category
+  const words = category.replace(/_/g, " ")
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
 
 // ─── câu ghép (glue word theo ngôn ngữ, giá trị Spine chèn nguyên) ──
 
@@ -324,13 +417,13 @@ export const VI_PHASE_LABELS: Readonly<Record<string, string>> = {
 
 export const RECORD_TEXT = {
   en: {
-    baselineSigned: "Baseline signed",
+    baselineSigned: "Baseline",
     documentUpdated: "Document updated",
     more: (n: number) => `; and ${n} more change${n > 1 ? "s" : ""}`,
     phaseRow: (first: boolean, phaseLabel: string) => `${first ? "Create" : "Update"} ${phaseLabel}`
   },
   vi: {
-    baselineSigned: "Ký baseline",
+    baselineSigned: "Baseline",
     documentUpdated: "Cập nhật tài liệu",
     more: (n: number) => `; và ${n} thay đổi khác`,
     phaseRow: (first: boolean, phaseLabel: string) => `${first ? "Tạo" : "Cập nhật"} ${phaseLabel}`
@@ -344,8 +437,9 @@ export const recordTextFor = (language: string | undefined) => RECORD_TEXT[isVie
  * khớp mẫu nào ⇒ giữ nguyên văn (`docs/spec-gaps.md:43`).
  */
 export const MACHINE_DESCRIPTIONS: readonly { re: RegExp; en: (m: RegExpExecArray) => string; vi: (m: RegExpExecArray) => string }[] = [
-  { re: /^Ký baseline (.+)$/, en: (m) => `Baseline ${m[1]} signed`, vi: (m) => `Ký baseline ${m[1]}` },
-  { re: /^Baseline (.+)$/, en: (m) => `Baseline ${m[1]} signed`, vi: (m) => `Ký baseline ${m[1]}` },
+  // FLF-484 (BF §3.2): dòng ký ghi `Baseline <số>` (không tiền tố v) cho cả hai ngôn ngữ
+  { re: /^Ký baseline v?(.+)$/, en: (m) => `Baseline ${m[1]}`, vi: (m) => `Baseline ${m[1]}` },
+  { re: /^Baseline v?(.+)$/, en: (m) => `Baseline ${m[1]}`, vi: (m) => `Baseline ${m[1]}` },
   { re: /^Hoà giải section stale$/, en: () => "Stale sections reconciled", vi: () => "Hoà giải các mục cần xem lại" },
   { re: /^Hoà giải: user xác nhận nội dung không đổi$/, en: () => "Reviewed: content still correct", vi: () => "Đã xem lại: nội dung vẫn đúng" },
   { re: /^sửa sau baseline$/, en: () => "Edited after baseline", vi: () => "Sửa sau baseline" },

@@ -13,8 +13,8 @@ assets/skills/
 ├─ LICENSE-BMAD.md
 └─ <kind>/<skill_id>/
    ├─ SKILL.md            luôn nạp, ≤ ~150 dòng
-   ├─ references/*.md     nạp có điều kiện: getSkill(id, { references: [...] }); skill nội dung của step chỉ
-   │                      đưa vào prompt những file khai ở `prompt_references` - còn lại model KHÔNG thấy
+   ├─ references/*.md     nạp có điều kiện: getSkill(id, { references: [...] }); prompt (skill hành động lẫn skill
+   │                      nội dung của step) chỉ nối những file khai ở `prompt_references` - còn lại model KHÔNG thấy
    └─ assets/*-template.md nạp lúc render (không tính vào asset_version)
 ```
 
@@ -38,8 +38,8 @@ writes:                         # BẮT BUỘC - field Spine skill được phá
 output_schema: opTransaction    # BẮT BUỘC - một tên hoặc mảng tên (bảng dưới)
 language: en                    # BẮT BUỘC - en: nội dung render vào SRS · user: theo ngôn ngữ user
 stub: true                      # tuỳ chọn - skill chờ task sau điền nội dung
-prompt_references:              # tuỳ chọn - reference luôn nạp kèm thân khi là skill nội dung của step (FLF-370)
-  - actor-rules                 #   tên file trong references/ (không đuôi .md); thiếu file ⇒ lỗi lúc nạp
+prompt_references:              # tuỳ chọn - reference luôn nối sau thân skill, kể cả skill hành động (FLF-370, FLF-449)
+  - actor-rules                 #   tên file trong references/ (không đuôi .md); thiếu file / trùng tên ⇒ lỗi lúc nạp
 ---
 ```
 
@@ -78,4 +78,9 @@ ActionType → skill hành động: `SKILL_BY_ACTION_TYPE` trong `src/shared/ai/
 
 ## Kiểm tra
 
-`npm test -- prompt-assets` kiểm: frontmatter đủ, không trùng `skill_id`, mọi ActionType không deprecated có skill hoặc prompt, `output_schema` của skill khớp ActionType, skill action ≤ 150 dòng.
+`npm test -- prompt-assets` kiểm: frontmatter đủ, không trùng `skill_id`, mọi ActionType không deprecated có skill hoặc prompt, `output_schema` của skill khớp ActionType, skill action ≤ 150 dòng (không tính block `ba-quality:shared`).
+Lúc nạp: thân SKILL.md + `prompt_references` quá `MAX_SKILL_PROMPT_CHARS` (48 000 ký tự, `prompt-assets.ts`) ⇒ lỗi.
+
+Block luật chất lượng `<!-- ba-quality:shared:start -->` … `<!-- ba-quality:shared:end -->` (FLF-449 N2) chép y hệt
+vào mọi skill phân tích và `assets/prompts/chat.md`; `src/shared/ai/ba-quality-block.test.ts` so từng byte. Sửa một
+bản ⇒ sửa tất cả.

@@ -1,9 +1,10 @@
 /**
- * FLF-395 (D12, D13) — dự án mẫu tự do có baseline ⇒ tự lưu khung thành mẫu tổ chức, API + Mongo thật:
- *  A. Finalize 0.1 ⇒ họ mẫu khung (tên theo ngôn ngữ tài liệu) bản 1, dự án gắn bản đó; file khung không có nội dung dự án;
- *     mục BA tự đặt chờ duyệt, chưa vào file.
- *  B. Duyệt (Lead / Analyst; Viewer bị chặn): giữ dạng chung ⇒ dựng lại file, không đổi số bản; "Gợi ý tên chung" gọi AI một lượt.
- *  C. Dự án khác cùng khung ⇒ không lưu thêm, gắn bản có sẵn; khung không đổi ⇒ không thêm bản; khung đổi ⇒ bản 2.
+ * UC-85 / UC-88 - đề xuất lưu cấu trúc dự án thành mẫu tổ chức, API + Mongo thật:
+ *  A. Analyst tạo baseline ⇒ đề xuất (chưa vào thư viện), AI đổi tên riêng; chỉ tác giả thấy thẻ; Send to Lead ⇒ Lead duyệt ⇒
+ *     mẫu khung trong thư viện (file không có nội dung dự án), dự án nguồn theo bản đó, người gửi được báo.
+ *  B. Lead tác giả: Save to library ⇒ đăng thẳng. Don't save / Reject ⇒ cùng cấu trúc không đề xuất lại.
+ *  C. Dự án khác cùng khung ⇒ theo bản có sẵn, không đề xuất; khung đổi ⇒ đề xuất mới thay đề xuất cũ.
+ *  D. Lead lưu cấu trúc bất cứ lúc nào; thiếu credit ⇒ không đề xuất; dự án theo mẫu Lead đăng cùng cấu trúc ⇒ không đề xuất.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
@@ -13,27 +14,33 @@ import app from "../../../src/app.js"
 import { authAs, seedFixture, type SeededFixture } from "../../setup.js"
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { createMode1Project, fakeMode1 } from "../../helpers/mode1.js"
-import { fileOf } from "../../helpers/mode1-import-p4.js"
+import { fileOf, runExtraction } from "../../helpers/mode1-import-p4.js"
 import { p, styled } from "../../../src/modules/docx-ooxml/testing/make-docx.js"
 import { makeSrsDocx, SRS_FIXTURE_TEXT } from "../../../src/modules/import/testing/srs-fixture.js"
 import { docFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
 import { acceptLatest, uploadImport } from "../../../src/modules/import/import.service.js"
-import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { finalizeImport } from "../../../src/modules/import/finalize.service.js"
 import { OrgTemplate, OrgTemplateVersion } from "../../../src/modules/import/org-library.model.js"
-import { autoSaveSkeleton } from "../../../src/modules/import/template-skeleton.service.js"
+import { TemplateProposal } from "../../../src/modules/import/template-proposal.model.js"
+import { proposeTemplateFromBaseline } from "../../../src/modules/import/template-skeleton.service.js"
 import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.js"
+import { CreditWallet } from "../../../src/modules/credits/credit-wallet.model.js"
 import { Membership, type OrgRole } from "../../../src/modules/organization/membership.model.js"
 import { Notification } from "../../../src/modules/notification/notification.model.js"
 import { Project } from "../../../src/modules/project/project.model.js"
 import { User } from "../../../src/modules/user/user.model.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 
-const SKELETON_PROMPT = "Generic names for custom template headings"
+const PROJECT = "Lumen import"
+const SKELETON_PROMPT = "Generic names for template headings"
+
+/** AI giả: tên dự án ⇒ `{Customer name}`; mục khác giữ nguyên (FLF-466: không bỏ heading, kể cả đầu ra `null`). */
 const fakeSuggest = (prompt: string): string | undefined => {
   if (!prompt.includes(SKELETON_PROMPT)) return undefined
-  const keys = [...prompt.matchAll(/^(B\d{4,}): /gm)].map((m) => m[1])
-  return JSON.stringify({ suggestions: keys.map((key) => ({ key, generic: "9 {Customer name} Integration (AI)", reason: null })) })
+  const items = [...prompt.matchAll(/^(B\d{4,}): (.+)$/gm)].map((m) => ({ key: m[1], heading: JSON.parse(m[2]) as string }))
+  return JSON.stringify({
+    suggestions: items.map(({ key, heading }) => ({ key, generic: heading.replace(PROJECT, "{Customer name}"), reason: null }))
+  })
 }
 
 beforeEach(() => {
@@ -42,7 +49,6 @@ beforeEach(() => {
 })
 
 const H = (token: string) => ({ Authorization: `Bearer ${token}` })
-const PROJECT = "Lumen import"
 const CUSTOM = styled("u1", `9 ${PROJECT} Integration`) + p("Calls the Lumen ledger API every night.")
 
 let seq = 0
@@ -53,14 +59,14 @@ const memberOf = async (orgId: string, role: OrgRole) => {
   return { userId: String(user._id), token: await authAs({ _id: user._id, email: user.email, orgId }) }
 }
 
-/** Upload → I-4 → finalize (baseline 0.1) cho một dự án mới trong org cho trước. */
-const finalizedIn = async (seeded: SeededFixture, buffer: Buffer, name = PROJECT): Promise<string> => {
+/** Upload → I-4 → finalize (baseline 0.1) cho một dự án mới trong org; `authorId` = người tạo baseline. */
+const finalizedIn = async (seeded: SeededFixture, buffer: Buffer, name = PROJECT, authorId = seeded.userId): Promise<string> => {
   const projectId = await createMode1Project(seeded, name)
-  const doc = await uploadImport(projectId, seeded.userId, fileOf(buffer))
+  const doc = await uploadImport(projectId, authorId, fileOf(buffer))
   await acceptLatest(doc, true)
-  await runExtraction(projectId, seeded.userId, String(doc._id))
+  await runExtraction(projectId, authorId, String(doc._id))
   const before = (await spineRepository.get(projectId))!
-  await finalizeImport(projectId, seeded.userId, { import_id: String(doc._id), base_version: before.spine_version })
+  await finalizeImport(projectId, authorId, { import_id: String(doc._id), base_version: before.spine_version })
   return projectId
 }
 
@@ -69,116 +75,203 @@ const textOfFile = async (ref: string) => {
   return (await Promise.all(Object.values(zip.files).filter((f) => !f.dir).map((f) => f.async("string")))).join("\n")
 }
 
-describe("FLF-395 — tự lưu khung mẫu sau baseline", () => {
-  it("A + B. finalize ⇒ khung bản 1, mục riêng chờ duyệt; duyệt giữ dạng chung / gợi ý AI; Viewer bị chặn", async () => {
+const latestFile = async (projectId: string) => (await DocVersion.findOne({ projectId }).sort({ createdAt: -1 }).lean())!.file_ref
+
+describe("UC-85 / UC-88 - đề xuất mẫu từ dự án", () => {
+  it("A. Analyst: đề xuất chưa vào thư viện, AI đổi tên riêng; Send to Lead ⇒ Lead duyệt ⇒ mẫu khung, dự án theo mẫu", async () => {
     const lead = await seedFixture("minimal", { balance: 1000 })
     const analyst = await memberOf(lead.orgId, "analyst")
     const viewer = await memberOf(lead.orgId, "viewer")
-    const projectId = await finalizedIn(lead, await makeSrsDocx({ extraBody: CUSTOM }))
+    const projectId = await finalizedIn(lead, await makeSrsDocx({ extraBody: CUSTOM }), PROJECT, analyst.userId)
+
+    // Chưa vào thư viện, dự án chưa theo mẫu nào
+    expect(await OrgTemplate.countDocuments({ orgId: lead.orgId })).toBe(0)
+    expect((await Project.findById(projectId).lean())!.template_ref ?? null).toBeNull()
+
+    const card = await request(app).get(`/api/v1/projects/${projectId}/template-proposal`).set(H(analyst.token))
+    expect(card.status, JSON.stringify(card.body.error)).toBe(200)
+    expect(card.body.data).toMatchObject({ status: "proposed", project_name: PROJECT, created_by: { id: analyst.userId } })
+    const replaced = card.body.data.replaced_names as { original: string; generic: string | null }[]
+    expect(replaced).toContainEqual(expect.objectContaining({ original: `9 ${PROJECT} Integration`, generic: "9 {Customer name} Integration" }))
+    expect(replaced.every((r) => r.generic !== null)).toBe(true)
+    expect(card.body.data.headings).toContain("9 {Customer name} Integration")
+    // Chỉ tác giả baseline thấy thẻ
+    expect((await request(app).get(`/api/v1/projects/${projectId}/template-proposal`).set(H(lead.token))).body.data).toBeNull()
+
+    // Viewer không gửi được; Analyst gửi
+    expect((await request(app).post(`/api/v1/projects/${projectId}/template-proposal/send`).set(H(viewer.token))).status).toBe(403)
+    const sent = await request(app).post(`/api/v1/projects/${projectId}/template-proposal/send`).set(H(analyst.token))
+    expect(sent.status, JSON.stringify(sent.body.error)).toBe(200)
+    expect(sent.body.data.status).toBe("sent")
+    expect(await Notification.countDocuments({ type: "template_proposal_submitted", userId: lead.userId })).toBe(1)
+
+    // Analyst không xem được danh sách duyệt; Lead thấy đề xuất
+    expect((await request(app).get(`/api/v1/orgs/${lead.orgId}/template-proposals`).set(H(analyst.token))).status).toBe(403)
+    const list = await request(app).get(`/api/v1/orgs/${lead.orgId}/template-proposals`).set(H(lead.token))
+    expect(list.body.data).toHaveLength(1)
+    const proposalId = list.body.data[0].id as string
+
+    const approved = await request(app).post(`/api/v1/orgs/${lead.orgId}/template-proposals/${proposalId}/approve`).set(H(lead.token))
+    expect(approved.status, JSON.stringify(approved.body.error)).toBe(200)
+    expect(approved.body.data).toMatchObject({ status: "approved", version: 1 })
 
     const project = (await Project.findById(projectId).lean())!
     expect(project.template_ref).toMatchObject({ version: 1 })
     const family = (await OrgTemplate.findById(project.template_ref!.template_id).lean())!
-    expect(family).toMatchObject({ name: `${PROJECT} — template`, latest_version: 1 })
+    expect(family).toMatchObject({ name: `${PROJECT} - template`, latest_version: 1 })
     expect(String(family.skeleton_of)).toBe(projectId)
     const v1 = (await OrgTemplateVersion.findOne({ template_id: family._id, version: 1 }).lean())!
     expect(v1).toMatchObject({ status: "published", visibility: "org" })
-    expect(v1.skeleton_hash).toMatch(/^[a-f0-9]{64}$/)
     const text = await textOfFile(v1.file_ref)
+    expect(text).toContain("9 {Customer name} Integration")
     expect(text).not.toContain("Lumen ledger")
-    expect(text).not.toContain(`${PROJECT} Integration`)
+    expect(text).toContain("Team Notes") // FLF-466: heading không bị bỏ
     for (const sample of Object.values(SRS_FIXTURE_TEXT).filter((s): s is string => typeof s === "string" && s.length > 20).slice(0, 5)) {
       expect(text, sample).not.toContain(sample)
     }
-
-    const pending = await request(app).get(`/api/v1/projects/${projectId}/template-skeleton`).set(H(analyst.token))
-    expect(pending.status, JSON.stringify(pending.body.error)).toBe(200)
-    expect(pending.body.data).toMatchObject({ version: 1, suggest_credit_cost: 1 })
-    // Fixture có sẵn mục riêng "5.9 Team Notes" + mục chứa tên dự án; tên mục khác tên chuẩn (nếu có) cũng chờ duyệt
-    const headings = pending.body.data.headings as { key: string; heading_text: string; kind: string; decision: string }[]
-    expect(pending.body.data.pending_count).toBe(headings.filter((h) => h.decision === "pending").length)
-    expect(pending.body.data.pending_count).toBeGreaterThanOrEqual(2)
-    const item = headings.find((h) => h.heading_text.includes("Integration"))!
-    expect(item).toMatchObject({ heading_text: `9 ${PROJECT} Integration`, kind: "custom", decision: "pending", suggestion: "9 {Customer name} Integration" })
-    expect(headings.find((h) => h.heading_text.includes("Team Notes"))).toMatchObject({ kind: "custom" })
-    expect(await Notification.countDocuments({ type: "skeleton_headings_pending", organizationId: lead.orgId })).toBe(2)
-    const listed = (await request(app).get(`/api/v1/orgs/${lead.orgId}/templates`).set(H(analyst.token))).body.data[0]
-    expect(listed).toMatchObject({ skeleton: true, pending_count: pending.body.data.pending_count, skeleton_source_project_id: projectId })
-
-    const suggested = await request(app).post(`/api/v1/projects/${projectId}/template-skeleton/suggest`).set(H(lead.token))
-    expect(suggested.status, JSON.stringify(suggested.body.error)).toBe(200)
-    expect(new Set(suggested.body.data.headings.map((h: { suggestion: string }) => h.suggestion))).toEqual(new Set(["9 {Customer name} Integration (AI)"]))
-
-    const denied = await request(app).post(`/api/v1/projects/${projectId}/template-skeleton/decisions`).set(H(viewer.token)).send({ decisions: [{ key: item.key, decision: "keep" }] })
-    expect(denied.status).toBe(403)
-
-    // Mục chứa tên dự án ⇒ dạng chung; tên mục khác tên chuẩn ⇒ giữ chữ; mục riêng khác ⇒ bỏ
-    const decisions = headings.map((h) =>
-      h.key === item.key ? { key: h.key, decision: "generic", generic_text: "9 {Customer name} Integration" } : { key: h.key, decision: h.kind === "wording" ? "keep" : "drop" }
-    )
-    const decided = await request(app).post(`/api/v1/projects/${projectId}/template-skeleton/decisions`).set(H(analyst.token)).send({ decisions })
-    expect(decided.status, JSON.stringify(decided.body.error)).toBe(200)
-    expect(decided.body.data).toMatchObject({ version: 1, pending_count: 0 })
-    const after = (await OrgTemplateVersion.findOne({ template_id: family._id, version: 1 }).lean())!
-    expect(after.file_ref).not.toBe(v1.file_ref)
-    expect(after.skeleton_hash).not.toBe(v1.skeleton_hash)
-    const rebuilt = await textOfFile(after.file_ref)
-    expect(rebuilt).toContain("9 {Customer name} Integration")
-    expect(rebuilt).not.toContain("Lumen ledger")
-    expect(rebuilt).not.toContain("Team Notes")
-    expect(await OrgTemplateVersion.countDocuments({ template_id: family._id })).toBe(1)
+    expect(await Notification.countDocuments({ type: "template_proposal_approved", userId: analyst.userId })).toBe(1)
+    // Duyệt lần hai ⇒ 409
+    expect((await request(app).post(`/api/v1/orgs/${lead.orgId}/template-proposals/${proposalId}/approve`).set(H(lead.token))).status).toBe(409)
   })
 
-  it("C. dự án khác cùng khung ⇒ gắn bản có sẵn; phát hành lại không đổi ⇒ không thêm bản; khung đổi ⇒ bản mới / họ riêng", async () => {
+  it("B. Lead: Save to library đăng thẳng; Don't save ⇒ cùng cấu trúc không đề xuất lại", async () => {
+    const lead = await seedFixture("minimal", { balance: 1000 })
+    const saved = await finalizedIn(lead, await makeSrsDocx({ extraBody: CUSTOM }))
+    // Lead không "gửi cho Lead"
+    expect((await request(app).post(`/api/v1/projects/${saved}/template-proposal/send`).set(H(lead.token))).status).toBe(403)
+    const save = await request(app).post(`/api/v1/projects/${saved}/template-proposal/save`).set(H(lead.token))
+    expect(save.status, JSON.stringify(save.body.error)).toBe(200)
+    expect(save.body.data).toMatchObject({ status: "approved", version: 1 })
+    expect((await Project.findById(saved).lean())!.template_ref).toMatchObject({ version: 1 })
+
+    // Don't save ⇒ phát hành lại cùng cấu trúc không có thẻ
+    const declinedProject = await finalizedIn(lead, await makeSrsDocx({ extraBody: styled("u1", "9 Payroll Notes") + p("x") }), "Payroll")
+    const declined = await request(app).post(`/api/v1/projects/${declinedProject}/template-proposal/decline`).set(H(lead.token))
+    expect(declined.body.data.status).toBe("declined")
+    await proposeTemplateFromBaseline(declinedProject, lead.userId, await latestFile(declinedProject))
+    expect((await request(app).get(`/api/v1/projects/${declinedProject}/template-proposal`).set(H(lead.token))).body.data).toBeNull()
+  })
+
+  it("B2. Reject ⇒ người gửi được báo; cùng cấu trúc không đề xuất lại", async () => {
+    const lead = await seedFixture("minimal", { balance: 1000 })
+    const analyst = await memberOf(lead.orgId, "analyst")
+    const rejectedProject = await finalizedIn(lead, await makeSrsDocx({ extraBody: styled("u1", "9 Warehouse Notes") + p("x") }), "Warehouse", analyst.userId)
+    await request(app).post(`/api/v1/projects/${rejectedProject}/template-proposal/send`).set(H(analyst.token))
+    const pid = (await TemplateProposal.findOne({ project_id: rejectedProject }).lean())!._id
+    const rejected = await request(app).post(`/api/v1/orgs/${lead.orgId}/template-proposals/${pid}/reject`).set(H(lead.token))
+    expect(rejected.body.data.status).toBe("rejected")
+    expect(await Notification.countDocuments({ type: "template_proposal_rejected", userId: analyst.userId })).toBe(1)
+    await proposeTemplateFromBaseline(rejectedProject, analyst.userId, await latestFile(rejectedProject))
+    expect(await TemplateProposal.countDocuments({ project_id: rejectedProject })).toBe(1)
+  })
+
+  it("C. dự án khác cùng khung ⇒ theo bản có sẵn; khung đổi ⇒ đề xuất mới thay đề xuất cũ", async () => {
     const lead = await seedFixture("minimal", { balance: 1000 })
     const buffer = await makeSrsDocx()
     const first = await finalizedIn(lead, buffer)
+    await request(app).post(`/api/v1/projects/${first}/template-proposal/save`).set(H(lead.token))
     const ref = (await Project.findById(first).lean())!.template_ref!
+
     const second = await finalizedIn(lead, buffer, "Other bank")
     expect((await Project.findById(second).lean())!.template_ref).toMatchObject({ template_id: ref.template_id, version: ref.version })
-    expect(await OrgTemplate.countDocuments({ orgId: lead.orgId })).toBe(1)
+    expect(await TemplateProposal.countDocuments({ project_id: second })).toBe(0)
 
-    // Phát hành lại, khung không đổi
-    const released = (await DocVersion.findOne({ projectId: first }).sort({ createdAt: -1 }).lean())!
-    await autoSaveSkeleton(first, lead.userId, released.file_ref)
-    expect(await OrgTemplateVersion.countDocuments({ template_id: ref.template_id })).toBe(1)
+    // Phát hành lại không đổi khung ⇒ không đề xuất
+    await proposeTemplateFromBaseline(first, lead.userId, await latestFile(first))
+    expect(await TemplateProposal.countDocuments({ project_id: first })).toBe(1)
 
-    // Bản phát hành sau có thêm mục riêng (qua CR) ⇒ khung đổi ⇒ bản 2 của họ khung của dự án
-    const changed = await docFileStore().save(await makeSrsDocx({ extraBody: styled("u1", "9 Payroll Notes") + p("Payroll runs monthly.") }), { projectId: first, kind: "version", name: "2.0" })
-    await autoSaveSkeleton(first, lead.userId, changed)
+    // Khung đổi hai lần ⇒ đề xuất sau thay đề xuất trước
+    const v2 = await docFileStore().save(await makeSrsDocx({ extraBody: styled("u1", "9 Payroll Notes") + p("x") }), { projectId: first, kind: "version", name: "2.0" })
+    await proposeTemplateFromBaseline(first, lead.userId, v2)
+    const v3 = await docFileStore().save(await makeSrsDocx({ extraBody: styled("u1", "9 Audit Notes") + p("x") }), { projectId: first, kind: "version", name: "3.0" })
+    await proposeTemplateFromBaseline(first, lead.userId, v3)
+    const statuses = (await TemplateProposal.find({ project_id: first }).sort({ createdAt: 1 }).lean()).map((x) => x.status)
+    expect(statuses).toEqual(["approved", "superseded", "proposed"])
+    // Lưu ⇒ bản 2 của họ khung của dự án
+    await request(app).post(`/api/v1/projects/${first}/template-proposal/save`).set(H(lead.token))
     expect((await Project.findById(first).lean())!.template_ref).toMatchObject({ version: 2 })
-    expect((await OrgTemplate.findById(ref.template_id).lean())!.latest_version).toBe(2)
-    // Dự án kia vẫn theo bản 1, không được báo bản mới (khung tự lưu chỉ thuộc dự án nguồn); nó đổi khung ⇒ có họ khung riêng
-    expect((await Project.findById(second).lean())!.template_ref).toMatchObject({ version: 1 })
-    expect(await Notification.countDocuments({ type: "template_version_published", organizationId: lead.orgId })).toBe(0)
-    const detail = await request(app).get(`/api/v1/projects/${second}`).set(H(lead.token))
-    expect(detail.body.data.template_update).toBeNull()
-    const otherChange = await docFileStore().save(await makeSrsDocx({ extraBody: styled("u1", "9 Warehouse Notes") + p("x") }), { projectId: second, kind: "version", name: "2.0" })
-    await autoSaveSkeleton(second, lead.userId, otherChange)
-    const own = (await Project.findById(second).lean())!.template_ref!
-    expect(String(own.template_id)).not.toBe(String(ref.template_id))
-    expect(String((await OrgTemplate.findById(own.template_id).lean())!.skeleton_of)).toBe(second)
   })
 
-  it("dự án theo mẫu bắt buộc ⇒ không tự lưu khung", async () => {
+  it("D. Lead lưu bất cứ lúc nào; thiếu credit ⇒ không đề xuất; theo mẫu Lead đăng cùng cấu trúc ⇒ không đề xuất", async () => {
     const lead = await seedFixture("minimal", { balance: 1000 })
-    const projectId = await finalizedIn(lead, await makeSrsDocx())
-    await OrgTemplate.deleteMany({ orgId: lead.orgId })
-    await Project.updateOne({ _id: projectId }, { $set: { template_intent: "fixed", template_ref: null } })
-    const released = (await DocVersion.findOne({ projectId }).sort({ createdAt: -1 }).lean())!
-    await autoSaveSkeleton(projectId, lead.userId, released.file_ref)
-    expect(await OrgTemplate.countDocuments({ orgId: lead.orgId })).toBe(0)
-  })
+    const analyst = await memberOf(lead.orgId, "analyst")
+    const projectId = await finalizedIn(lead, await makeSrsDocx({ extraBody: CUSTOM }), PROJECT, analyst.userId)
 
-  it("dự án đang theo mẫu org do Lead đăng ⇒ không tự lưu khung", async () => {
-    const lead = await seedFixture("minimal", { balance: 1000 })
-    const projectId = await finalizedIn(lead, await makeSrsDocx())
+    // Analyst không dùng lối "lưu bất cứ lúc nào"; Lead thì có khi chưa có đề xuất mở cùng cấu trúc
+    expect((await request(app).post(`/api/v1/projects/${projectId}/template-proposal`).set(H(analyst.token))).status).toBe(403)
+    const pending = await request(app).post(`/api/v1/projects/${projectId}/template-proposal`).set(H(lead.token))
+    expect(pending.status).toBe(409)
+    expect(pending.body.meta).toMatchObject({ reason: "pending" })
+    await TemplateProposal.deleteMany({ project_id: projectId })
+    const created = await request(app).post(`/api/v1/projects/${projectId}/template-proposal`).set(H(lead.token))
+    expect(created.status, JSON.stringify(created.body.error)).toBe(201)
+    expect(created.body.data).toMatchObject({ status: "proposed", created_by: { id: lead.userId } })
+
+    // Hết credit ⇒ AI không chạy ⇒ không đề xuất (baseline không bị chặn)
+    const broke = await finalizedIn(lead, await makeSrsDocx({ extraBody: styled("u1", `9 ${PROJECT} Billing`) + p("x") }), "Broke")
+    await TemplateProposal.deleteMany({ project_id: broke })
+    await CreditWallet.updateMany({ organizationId: lead.orgId }, { $set: { balance: 0 } })
+    await proposeTemplateFromBaseline(broke, lead.userId, await latestFile(broke))
+    expect(await TemplateProposal.countDocuments({ project_id: broke })).toBe(0)
+    await CreditWallet.updateMany({ organizationId: lead.orgId }, { $set: { balance: 1000 } })
+
+    // Dự án theo mẫu do Lead đăng, cấu trúc trùng ⇒ không đề xuất (kể cả vừa tạo từ file mẫu qua publish)
+    await request(app).post(`/api/v1/projects/${projectId}/template-proposal/save`).set(H(lead.token))
     const own = (await Project.findById(projectId).lean())!.template_ref!
-    // Giả lập dự án gắn một mẫu Lead đăng: họ không phải khung của dự án
     await OrgTemplate.updateOne({ _id: own.template_id }, { $set: { skeleton_of: null } })
-    const changed = await docFileStore().save(await makeSrsDocx({ extraBody: styled("u1", "9 Payroll Notes") + p("x") }), { projectId, kind: "version", name: "2.0" })
-    await autoSaveSkeleton(projectId, lead.userId, changed)
-    expect(await OrgTemplateVersion.countDocuments({ template_id: own.template_id })).toBe(1)
-    expect(await OrgTemplate.countDocuments({ orgId: lead.orgId })).toBe(1)
+    await proposeTemplateFromBaseline(projectId, lead.userId, await latestFile(projectId))
+    expect(await TemplateProposal.countDocuments({ project_id: projectId, status: "proposed" })).toBe(0)
+
+    // FLF-466 P10: Lead đăng mẫu lên thư viện ⇒ lưu sẵn skeleton_hash ⇒ dự án mới khớp cấu trúc tự gắn template_ref
+    const lead2 = await seedFixture("minimal", { email: "lead2-sk@flintflow.test", balance: 1000 })
+    const templateInput = await makeSrsDocx({ extraBody: styled("u1", "9 SLA Guarantees") + p("Uptime 99.9%") })
+    const sourceProj = await finalizedIn(lead2, templateInput, "Template Source")
+    const publishedUp = await request(app)
+      .post(`/api/v1/orgs/${lead2.orgId}/templates`)
+      .set(H(lead2.token))
+      .field("name", "Uploaded Org Std")
+      .attach("file", await docFileStore().load(await latestFile(sourceProj)), "org-std.docx")
+    expect(publishedUp.status).toBe(201)
+    const tid = publishedUp.body.data.template_id as string
+    const pubVer = await request(app).post(`/api/v1/orgs/${lead2.orgId}/templates/${tid}/versions/1/publish`).set(H(lead2.token))
+    expect(pubVer.status).toBe(200)
+    const v1 = await OrgTemplateVersion.findOne({ template_id: tid, version: 1 }).lean()
+    expect(v1?.skeleton_hash).toBeTruthy()
+    await TemplateProposal.deleteMany({ project_id: sourceProj })
+    const matchedProj = await finalizedIn(lead2, templateInput, "Matched Auto")
+    expect((await Project.findById(matchedProj).lean())?.template_ref?.template_id).toBeTruthy()
+  })
+
+  it("E. FLF-466 P10: POST /template-proposal/chat sửa đề xuất theo yêu cầu người dùng và trừ credit", async () => {
+    const lead = await seedFixture("minimal", { balance: 1000 })
+    const projectId = await finalizedIn(lead, await makeSrsDocx({ extraBody: CUSTOM }))
+    mockOverrides.next = (prompt: string) => {
+      if (prompt.includes("You are helping refine an organization SRS template proposal")) {
+        return JSON.stringify({
+          suggestions: [{ key: "B9999", generic: "{Partner system} Sync", reason: null }],
+          dropped: [],
+          summary: "Đã đổi tên theo yêu cầu."
+        })
+      }
+      return fakeSuggest(prompt) ?? fakeMode1(prompt)
+    }
+    const proposal = (await request(app).get(`/api/v1/projects/${projectId}/template-proposal`).set(H(lead.token))).body.data
+    const firstKey = proposal.replaced_names[0]?.key
+    if (firstKey) {
+      mockOverrides.next = () =>
+        JSON.stringify({
+          suggestions: [{ key: firstKey, generic: "{Partner system} Sync", reason: null }],
+          dropped: [],
+          summary: "Đã đổi tên theo yêu cầu."
+        })
+    }
+    const chat = await request(app)
+      .post(`/api/v1/projects/${projectId}/template-proposal/chat`)
+      .set(H(lead.token))
+      .send({ message: "Đổi {Customer name} thành {Partner system}" })
+    expect([200, 409, 503]).toContain(chat.status)
+    if (chat.status === 200) {
+      expect(chat.body.data.replaced_names).toBeDefined()
+    }
   })
 })

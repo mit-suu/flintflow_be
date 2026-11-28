@@ -15,10 +15,12 @@ import {
   LOCATION_ID_PATTERN,
   CR_MATERIAL_KINDS,
   CR_MATERIAL_MAX_CHARS,
+  CR_MAX_FLAG_IDS,
   MATERIAL_ID_PATTERN,
   NEW_CR_SOURCE_KINDS
 } from "./change-request.constants.js"
 import { COMMENT_ID_PATTERN } from "../comment/comment.model.js"
+import { ORIGINAL_DIAGRAM_KINDS } from "../spine/original-diagram.js"
 
 const id = z.string().min(1)
 const isoDateTime = z.iso.datetime({ offset: true })
@@ -29,6 +31,15 @@ export const crIdSchema = z.string().regex(CR_ID_PATTERN, "Mã change request kh
 export const locationIdSchema = z.string().regex(LOCATION_ID_PATTERN, "Mã vị trí cần sửa không hợp lệ.")
 export const materialIdSchema = z.string().regex(MATERIAL_ID_PATTERN, "Mã tài liệu bổ sung không hợp lệ.")
 export const groupIdSchema = z.string().regex(GROUP_ID_PATTERN, "Mã nhóm thay đổi không hợp lệ.")
+
+/** Hình xem trước của vị trí sơ đồ gốc: loại sơ đồ, chủ (loại gắn phần tử), phần thứ mấy (use case tách theo feature). */
+export const diagramPreviewQuerySchema = z.object({
+  kind: z.enum(ORIGINAL_DIAGRAM_KINDS as unknown as [string, ...string[]]),
+  owner: z.string().trim().min(1).max(100).optional(),
+  part: z.coerce.number().int().min(0).max(50).default(0),
+  /** `after` = sơ đồ FlintFlow sau CR (mặc định); `original` = ảnh gốc của file đang giữ ở chỗ đó */
+  variant: z.enum(["after", "original"]).default("after")
+})
 
 /** Lý do từ chối group / đóng / huỷ — đủ dài để có nghĩa khi đọc lại lịch sử. */
 export const DECISION_REASON_MIN_LENGTH = 10
@@ -58,9 +69,13 @@ export const changeRequestDtoSchema = z.object({
       questions: z.array(z.string()),
       answers: z.array(z.string()),
       /** Phase 7: đáp án AI gợi ý, song song `questions` (`[]` cho câu không có gợi ý). */
-      suggestions: z.array(z.array(z.string()))
+      suggestions: z.array(z.array(z.string())),
+      /** FLF-474: loại từng câu, song song `questions` ("contradiction" bắt buộc trả lời, "ambiguous" bỏ qua được); CR cũ ⇒ `[]`. */
+      kinds: z.array(z.enum(["contradiction", "ambiguous"])).default([])
     })
   ),
+  /** FLF-474: nhãn vòng làm rõ đang chờ trả lời — BE đếm đúng như `runClarify`; `extra` = vòng thêm sau trần 3 (câu mâu thuẫn). `null` khi không chờ. */
+  clarify_round: z.object({ n: z.number().int().min(1), max: z.number().int().min(1), extra: z.boolean() }).nullable().default(null),
   base_doc_version: z.string().min(1),
   result_doc_version: z.string().nullable(),
   created_by: id,
@@ -69,6 +84,8 @@ export const changeRequestDtoSchema = z.object({
   submitted_at: isoDateTime.nullable(),
   decided_by: id.nullable(),
   closed_reason: z.string().nullable(),
+  /** FLF-445: cờ CR này sửa (tạo từ hàng việc chờ quyết); CR khác ⇒ `[]`. */
+  flag_ids: z.array(z.string()).default([]),
   /** Mode 1 v3: bản xem trước đính kèm lúc tạo (gợi ý cho C-2/C-3/C-4), không có ⇒ `null`. */
   seed: z.object({ instruction: z.string().nullable(), ops: z.array(z.record(z.string(), z.unknown())), targets: z.array(z.string()) }).nullable(),
   /** Mode 1 v3 phase 7: tài liệu bổ sung (chữ đã tách) — ngữ cảnh cho C-2, C-4, 3.9. */
@@ -85,6 +102,11 @@ export const changeRequestDtoSchema = z.object({
   ),
   /** Mode 1 v3 phase 7: dữ kiện C-2 báo vẫn thiếu khi hết vòng hỏi — C-4 sẽ phải giả định. */
   missing_info: z.array(z.string()),
+  /**
+   * C-2 đọc câu trả lời vừa gửi và thấy người yêu cầu muốn rút lại yêu cầu (lời tự gõ mà luật rút lại của FE không bắt) ⇒
+   * FE hỏi "Huỷ change request?" trước khi đi tiếp. Chỉ là gợi ý: không ai tự huỷ CR.
+   */
+  withdraw_suggested: z.boolean(),
   /** Phase 8: lệnh sửa gộp thêm (chat) theo thứ tự. */
   amendments: z.array(z.object({ text: z.string(), at: isoDateTime })),
   created_at: isoDateTime,
@@ -131,6 +153,12 @@ export const changeLocationDtoSchema = z.object({
     })
     .nullable(),
   group_id: groupIdSchema.nullable(),
+  /** C-4: AI cảnh báo yêu cầu không hợp lý ở chỗ này (kèm lý do); chưa `kept_intent` ⇒ chặn xác nhận tới khi BA chọn "Vẫn làm" hoặc bỏ chỗ này. */
+  warning: z.object({ text: z.string(), reason: z.string() }).nullable().optional(),
+  /** BA đã chọn "Vẫn làm" sau cảnh báo (`PATCH` với `action: "proceed"`). */
+  kept_intent: z.boolean().optional(),
+  /** C-5 "giữ theo ý mình" (`PATCH` với `action: "keep"`): mã luật đã chấp nhận vi phạm; sau khi ghi, cờ đỏ thật hiện trên tài liệu. */
+  kept_violations: z.array(z.string()).optional(),
   /**
    * FLF-375: tên chỗ + nội dung trước / sau người đọc được (không mã nội bộ) — FE hiện cái này, không tự ghép path / id.
    * `kind`: tên mảng Spine hoặc `paragraph` · `table` · `image` (khối văn bản của file).
@@ -188,7 +216,9 @@ export const createChangeRequestSchema = z.strictObject({
   /** UC-49 "Create CR from comment": comment còn mở được chuyển thành CR này (status `converted`). Cần `source.kind = viewer_comment`. */
   comment_id: z.string().regex(COMMENT_ID_PATTERN, "Mã comment không hợp lệ.").optional(),
   /** Mode 1 v3 phase 7: đoạn văn bản nguồn dán ở 3.1 (email, biên bản…) — file thì upload sau qua `/materials`. */
-  materials: z.array(z.strictObject({ name: text(200), text: text(CR_MATERIAL_MAX_CHARS * 2) })).max(5).optional()
+  materials: z.array(z.strictObject({ name: text(200), text: text(CR_MATERIAL_MAX_CHARS * 2) })).max(5).optional(),
+  /** FLF-445: nhóm cờ CR này sửa (cờ mở, cùng project). Phần tử / mục của các cờ thành đích C-3. */
+  flag_ids: z.array(z.string().trim().min(1).max(100)).min(1).max(CR_MAX_FLAG_IDS).optional()
 })
 
 /** `GET /projects/:id/change-requests?status=` */
@@ -197,19 +227,52 @@ export const listChangeRequestsQuerySchema = z.object({ status: crStatusSchema.o
 export const crParamsSchema = z.object({ crId: crIdSchema })
 
 // ─── FLF-338 §3.6.1 rút yêu cầu từ tài liệu thô ─────────────────
+/** FLF-449: trần số mục một bản rút (thay trần 40) — cùng `EXTRACTION_MAX_ITEMS` của service. */
+export const EXTRACTION_DECISIONS_MAX = 500
+const extractionSourcedDto = z.object({ para_id: z.string().nullable(), quote: z.string() })
+/** FLF-449: phương án của mục Suy ra — tương thích kiểu `OptionAnalysis` chung (N1). */
+export const extractionOptionSchema = z.object({
+  label: z.string(),
+  description: z.string().nullable(),
+  pros: z.array(z.string()),
+  cons: z.array(z.string()),
+  risks: z.array(z.string())
+})
+export const extractionInferenceSchema = z.object({
+  symptom: z.string(),
+  symptom_quote: z.string(),
+  symptom_para_id: z.string().nullable(),
+  root_cause: z.string(),
+  rationale: z.string(),
+  options: z.array(extractionOptionSchema),
+  /** Chỉ số phương án khuyến nghị; `null` = không khuyến nghị (AI chưa chắc chắn). */
+  recommended: z.number().int().nullable(),
+  recommendation_reason: z.string().nullable(),
+  serves_goal: z.string().nullable()
+})
 export const extractionItemSchema = z.object({
   id: z.string().min(1),
   text: z.string(),
-  label: z.enum(["new", "modification", "duplicate", "contradiction", "ambiguous"]),
+  label: z.enum(["new", "modification", "duplicate", "contradiction", "ambiguous", "inferred"]),
   para_id: z.string().nullable(),
   quote: z.string(),
   group: z.string(),
   entity_paths: z.array(z.string()),
+  /** FLF-449: tên đọc được của từng phần tử trong `entity_paths` (cùng thứ tự, "" khi không có) — UI không in path thô. */
+  entity_names: z.array(z.string()),
+  /** FLF-449: người nói (chỉ khi tài liệu ghi rõ). */
+  speaker: z.string().nullable(),
+  /** FLF-449: mâu thuẫn — mỗi phía kèm người nói + câu trích. */
+  sides: z.array(extractionSourcedDto.extend({ speaker: z.string().nullable() })),
+  /** FLF-449: chỉ mục `inferred`. */
+  inference: extractionInferenceSchema.nullable(),
   question: z.string().nullable(),
   suggested_answers: z.array(z.string()),
   include: z.boolean().nullable(),
   drop_reason: z.string().nullable(),
   answer: z.string().nullable(),
+  /** FLF-449: phương án BA đã chọn của mục Suy ra. */
+  chosen_option: z.number().int().nullable(),
   cr_id: z.string().nullable()
 })
 export const extractionSchema = z.object({
@@ -217,7 +280,11 @@ export const extractionSchema = z.object({
   document_name: z.string(),
   doc_code: z.number().int().min(1),
   status: z.enum(["extracted", "approved"]),
+  /** FLF-449: đầu danh sách — hiện trạng / mong muốn kèm câu trích. */
+  situation: z.object({ current: z.array(extractionSourcedDto.extend({ text: z.string() })), desired: z.array(extractionSourcedDto.extend({ text: z.string() })) }),
   items: z.array(extractionItemSchema),
+  /** FLF-449: số lô (mỗi lô một lượt AI) — tài liệu dài chia lô. */
+  batches: z.number().int().min(0),
   credits: z.number().min(0),
   approved_at: z.string().nullable(),
   created_at: z.string(),
@@ -234,12 +301,16 @@ export const approveExtractionSchema = z.strictObject({
         include: z.boolean(),
         drop_reason: z.string().trim().max(500).nullable().optional(),
         answer: z.string().trim().max(2000).nullable().optional(),
-        group: z.string().trim().max(50).nullable().optional()
+        group: z.string().trim().max(50).nullable().optional(),
+        /** FLF-449: mục Suy ra được tick phải chọn một phương án (chỉ số trong `inference.options`). */
+        chosen_option: z.number().int().min(0).max(9).nullable().optional()
       })
     )
     .min(1)
-    .max(40)
+    .max(EXTRACTION_DECISIONS_MAX)
 })
+/** FLF-449: `GET …/extract/estimate` — số lô + credit dự kiến trước khi rút. */
+export const extractionEstimateSchema = z.object({ batches: z.number().int().min(0), credits: z.number().min(0), cost_per_batch: z.number().min(0) })
 export type ApproveExtractionDTO = z.infer<typeof approveExtractionSchema>
 
 /** `POST …/:crId/answers` (UC-49) — trả lời theo đúng thứ tự câu hỏi của vòng làm rõ gần nhất. */
@@ -265,9 +336,15 @@ export const materialParamsSchema = z.object({ crId: crIdSchema, mid: materialId
 export const patchLocationRequestSchema = z
   .strictObject({
     conclusion: z.enum(LOCATION_CONCLUSIONS).optional(),
-    reason: text(2000).optional()
+    reason: text(2000).optional(),
+    /**
+     * `keep` (C-5 "giữ theo ý mình"): chỉ chỗ `manual_fix` mà mọi lỗi là lỗi luật; `proceed` (C-4 "Vẫn làm"): chỗ AI đã
+     * cảnh báo - ghi `kept_intent` rồi AI soạn theo yêu cầu. Đi một mình, không kèm field khác.
+     */
+    action: z.enum(["keep", "proceed"]).optional()
   })
   .refine((v) => Object.keys(v).length > 0, { message: "Cần ít nhất một field để sửa" })
+  .refine((v) => v.action === undefined || (v.conclusion === undefined && v.reason === undefined), { message: "action đi một mình", path: ["action"] })
   .refine((v) => v.conclusion !== "not_related" || v.reason !== undefined, { message: "Giữ nguyên / bỏ chỗ này cần có lý do.", path: ["reason"] })
 
 /**
@@ -282,6 +359,9 @@ export const groupDecisionRequestSchema = z.strictObject({
 
 /** `POST …/:crId/locations/:locId/owner-step-draft` (BPMN 3.9, mode 1 v3) — hướng sửa của BA cho skill step sở hữu. */
 export const ownerStepDraftRequestSchema = z.strictObject({ instruction: text(4000) })
+
+/** `POST …/:crId/revert`: hoàn tác một CR đã ghi bằng CR mới (nguồn `revert`) — cần người yêu cầu như mọi CR. */
+export const revertRequestSchema = z.strictObject({ requester: text(200) })
 
 /** `POST …/:crId/close` (3.13) và `POST …/:crId/cancel` (3.10, UC-53). */
 export const closeRequestSchema = z.strictObject({ reason: z.string().trim().min(DECISION_REASON_MIN_LENGTH).max(2000) })
@@ -300,7 +380,9 @@ export const changeRequestDetailSchema = z.object({
   locations: z.array(changeLocationDtoSchema),
   groups: z.array(changeGroupDtoSchema),
   /** Câu hỏi của vòng làm rõ đang chờ trả lời (`awaiting_answers`), rỗng nếu không chờ. */
-  pending_questions: z.array(z.string())
+  pending_questions: z.array(z.string()),
+  /** C-3 liệt kê đủ vị trí: CR còn ở xem phạm vi mà có hơn 80 vị trí ⇒ ước chi phí C-4 (số lô × giá một lô); còn lại `null`. Tuỳ chọn. */
+  propose_estimate: z.object({ locations: z.number().int(), batches: z.number().int(), credits: z.number() }).nullable().optional()
 })
 
 /** `meta` của 409 PATH_LOCKED (FLF-186) — phần tử Spine nào đang bị CR nào giữ. */

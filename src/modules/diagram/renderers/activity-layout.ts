@@ -394,7 +394,7 @@ export const layoutActivity = (d: ActivityLayoutInput): Scene => {
     return w + slotsOf[lane] * CELL_W
   }
   const slackLeft = lanes.map((_, lane) => {
-    const need = Math.max(0, ...headLines[lane].map((line) => textWidth(line, HEAD_SIZE, true) + 28))
+    const need = Math.max(0, ...headLines[lane].map((line) => textWidth(line, HEAD_SIZE) + 28))
     return Math.max(0, need - laneWidth(lane)) / 2
   })
   const gutterLeft: number[] = []
@@ -497,7 +497,7 @@ export const layoutActivity = (d: ActivityLayoutInput): Scene => {
       scene.rect(id, laneX[i], 0, laneRight[i] - laneX[i], bottom, { name: lane.name, container: true })
       scene.rect(`${id}#head`, laneX[i], 0, laneRight[i] - laneX[i], headH, { name: lane.name })
       headLines[i].forEach((line, k) =>
-        scene.text(`${id}#t${k}`, (laneX[i] + laneRight[i]) / 2, headH / 2 + (k - (headLines[i].length - 1) / 2) * HEAD_LINE, line, { owner: `${id}#head`, size: HEAD_SIZE, bold: true, baseline: "central" })
+        scene.text(`${id}#t${k}`, (laneX[i] + laneRight[i]) / 2, headH / 2 + (k - (headLines[i].length - 1) / 2) * HEAD_LINE, line, { owner: `${id}#head`, size: HEAD_SIZE, baseline: "central" })
       )
     })
   }

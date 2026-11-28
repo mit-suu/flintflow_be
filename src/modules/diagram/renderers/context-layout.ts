@@ -1,5 +1,5 @@
 /**
- * Hình học sơ đồ ngữ cảnh (DFD mức 0, ký pháp Yourdon/DeMarco) — port từ `docs/diagram_guideline/context/build-context-diagram.mjs`.
+ * Hình học sơ đồ ngữ cảnh (DFD mức 0, ký pháp Yourdon/DeMarco) — port từ bộ sinh sơ đồ ngữ cảnh viết tay của tài liệu dự án.
  * Đơn vị px, trục y hướng xuống (khớp `Scene`). Hệ thống là MỘT vòng tròn ở gốc toạ độ; actor nằm trên một ellipse
  * quanh nó: người dùng nửa trái, hệ thống ngoài + bộ hẹn giờ nửa phải (một nửa trống ⇒ chia đôi danh sách).
  *
@@ -111,7 +111,7 @@ const prepare = (actor: ContextActor): Prepared => {
     ...actor.inbound.map((text, index): Flow => ({ dir: "in", index, text })),
     ...actor.outbound.map((text, index): Flow => ({ dir: "out", index, text }))
   ]
-  const nameW = Math.max(...lines.map((l) => textWidth(l, NAME_SIZE, true)))
+  const nameW = Math.max(...lines.map((l) => textWidth(l, NAME_SIZE)))
   return {
     actor,
     lines,
@@ -332,7 +332,7 @@ export const buildContextLayout = (actors: readonly ContextActor[], systemName =
   const { left, right } = splitSides(prepared)
 
   // Vòng tròn chứa trọn tên (nửa đường chéo khối chữ + lề), luồng dày nhất còn hợp lệ, và đủ chu vi cho các chùm
-  const nameW = Math.max(...systemLines.map((l) => textWidth(l, NAME_SIZE, true)))
+  const nameW = Math.max(...systemLines.map((l) => textWidth(l, NAME_SIZE)))
   const nameH = systemLines.length * NAME_LINE_HEIGHT
   const widest = Math.max(0, ...prepared.map(bundleWidth))
   const arcNeed = (group: Prepared[]): number => sum(clearances(group)) / (2 * SPAN_MAX)

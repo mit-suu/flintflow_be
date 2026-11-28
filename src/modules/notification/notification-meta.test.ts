@@ -5,6 +5,7 @@ import mongoose from "mongoose"
 
 const notifySpy = vi.fn().mockResolvedValue(null)
 
+vi.mock("../import/layout-preview.service.js", () => ({ assertLayoutConfirmedForBaseline: async () => undefined }))
 vi.mock("./notification.service.js", () => ({
   notify: (...args: unknown[]) => notifySpy(...args)
 }))
@@ -112,6 +113,8 @@ vi.mock("../spine/spine.repository.js", async (importOriginal) => {
   return {
     ...actual,
     get: spineMocks.spineRepository.get,
+    // FLF-480 (B13): gói duyệt dựng lại các vòng "Yêu cầu sửa" từ change log
+    listChanges: async () => [],
     repository: spineMocks.spineRepository,
     spineRepository: spineMocks.spineRepository
   }
@@ -218,7 +221,8 @@ vi.mock("../doc-version/doc-version.service.js", () => ({
 
 vi.mock("../doc-version/doc-version.model.js", () => ({
   DocVersion: {
-    find: vi.fn().mockResolvedValue([])
+    find: vi.fn().mockResolvedValue([]),
+    exists: vi.fn().mockResolvedValue(null)
   }
 }))
 

@@ -2,6 +2,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { DocxPackage, MAIN_PART, readBlocks, writeStamp } from "../docx-ooxml/index.js"
 import { NS, isW, wAll, wAttr, wEl, wKid, wKids, wText } from "../docx-ooxml/xml.js"
 import { assignBlockIds, parseDocument } from "../import/parse.service.js"
+import { projectCode } from "../project/project-code.js"
 import { exportLineage, writeDocx } from "./docx-writer.js"
 import type { Block, InlineRun, RenderedDocument, RenderedSection } from "./rendered-document.types.js"
 import { isInstructionText } from "../../shared/utils/instruction-text.js"
@@ -17,6 +18,20 @@ const unavailable = (reason: string): never => {
   throw new ApiError(422, "Không thể điền nội dung vào bố cục mẫu gốc.", TEMPLATE_LAYOUT_UNAVAILABLE, { reason })
 }
 
+/** Lý do kỹ thuật của lỗi điền mục (`meta.reason`), không chỉ câu thông báo chung cho người dùng. */
+export const layoutFailureReason = (err: unknown): string => {
+  const reason = err instanceof ApiError ? err.meta?.reason : undefined
+  return typeof reason === "string" && reason ? reason : err instanceof Error ? err.message : String(err)
+}
+
+const isSlotFailure = (err: unknown): boolean => err instanceof ApiError && (err.code === TEMPLATE_LAYOUT_UNAVAILABLE || err.code === "RENDER_IMAGE_INVALID")
+
+/** Mục không điền được ở chế độ chịu lỗi (`SourceWriteOptions.failures`): slot giữ nguyên như trong file nền. */
+export interface SlotFailure {
+  section_id: string
+  reason: string
+}
+
 /**
  * Dự án "Upload SRS có sẵn" (`render/source-fidelity.ts`): file upload là bản gốc đã viết, không phải mẫu để điền.
  * - `keepSource`: mục nguyên vẹn so với lúc import ⇒ slot giữ nguyên node gốc (đoạn, bảng, ảnh, field, chú thích).
@@ -28,6 +43,12 @@ const GROUP_OF_CUSTOM = "group:custom:"
 
 export interface SourceWriteOptions {
   keepSource?: ReadonlySet<string>
+  /**
+   * FLF-468 (lát A): id mục có section lúc import / mốc nguyên vẹn. Slot không còn section nào trong bản in hiện tại mà
+   * id của nó nằm trong tập này ⇒ CR đã xoá hẳn phần tử — mục của phần tử (`function:` / `feature:` / `custom:`) bỏ cả
+   * heading lẫn thân; mục cố định của mẫu giữ heading, thân về chữ hướng dẫn.
+   */
+  importedSectionIds?: ReadonlySet<string>
   legacyRecordCount?: number
   /**
    * FLF-378 (luồng C, C2.5): file là **mẫu** của dự án mới — hướng dẫn, ví dụ, ngữ cảnh của mẫu không lọt vào bản in: mục
@@ -40,6 +61,11 @@ export interface SourceWriteOptions {
    * in (trước heading kế tiếp của file); `moveToEnd` (mục Ngoài phạm vi) ⇒ cả heading lẫn nội dung chuyển xuống cuối tài liệu.
    */
   rearrange?: { moveToEnd: readonly string[] }
+  /**
+   * Chế độ chịu lỗi (dựng file nền khi đổi mẫu): mục không điền được (heading không định vị được, bảng / ảnh / field không thay
+   * an toàn được…) ghi vào mảng này và giữ nguyên slot, các mục khác vẫn điền. Không truyền ⇒ ném như cũ (bản xuất).
+   */
+  failures?: SlotFailure[]
 }
 
 /** Populate the imported package in place: its styles, sections and ancillary parts remain authoritative. */
@@ -57,8 +83,20 @@ export async function writeTemplateDocx(
   const originalBookmarkIds = new Set(wAll(xml, "bookmarkStart").map((b) => wAttr(b, "id")))
   const blocks = assignBlockIds(await readBlocks(pkg))
   const headings = blocks.filter((b) => b.kind === "heading")
+  const failures = sourceOptions.failures
+  /** Chế độ chịu lỗi: lỗi điền của một mục ghi vào `failures` (mọi `sectionIds`), trả `undefined`; không thì ném như cũ. */
+  const tolerate = async <T>(sectionIds: readonly string[], fn: () => T | Promise<T>): Promise<T | undefined> => {
+    try {
+      return await fn()
+    } catch (err) {
+      if (!failures || !isSlotFailure(err)) throw err
+      const reason = layoutFailureReason(err)
+      for (const id of new Set(sectionIds)) failures.push({ section_id: id, reason })
+      return undefined
+    }
+  }
   if (!headingMap.length) unavailable("No mapped headings")
-  const slots = headingMap.map((entry) => {
+  const slotOfEntry = (entry: (typeof headingMap)[number]) => {
     const heading = headings.find((b) => b.block_id === entry.block_id)
     if (!heading || heading.tail || !heading.element.parentNode) return unavailable(`Missing heading ${entry.block_id}`)
     // A heading sharing its paragraph with body text cannot be safely replaced as a slot.
@@ -69,7 +107,17 @@ export async function writeTemplateDocx(
       if (n.nodeType === 1) nodes.push(n as Element)
     }
     return { ...entry, heading, nodes, sections: [] as RenderedSection[] }
-  })
+  }
+  type Slot = ReturnType<typeof slotOfEntry>
+  const slots: Slot[] = []
+  for (const entry of headingMap) {
+    const slot = await tolerate([entry.section_id], () => {
+      // Hai mục trỏ cùng một heading: chế độ chịu lỗi giữ mục đầu, mục sau báo lỗi
+      if (failures && slots.some((s) => s.block_id === entry.block_id)) unavailable(`Duplicate mapped heading ${entry.block_id}`)
+      return slotOfEntry(entry)
+    })
+    if (slot) slots.push(slot)
+  }
   if (new Set(slots.map((s) => s.block_id)).size !== slots.length) unavailable("Duplicate mapped heading")
   // FLF-413: heading khung của mẫu (`3.2 <<Feature Name 1>>`) — tính năng / chức năng thật lấp vào, phần dư lặp theo khung
   const frameSlots = slots.filter((s) => isFrameHeading(s.section_id, s.heading.text))
@@ -90,12 +138,14 @@ export async function writeTemplateDocx(
     if (!own && keep?.has(section.id) && (rearrange || !slot)) continue
     // FLF-416 chế độ 4: mục không có heading trong file ⇒ heading mới đúng vị trí bản in, không gộp vào mục cha.
     // FLF-413: tính năng / chức năng dư của mẫu có khung ⇒ heading mới lặp theo định dạng khung (không thành đoạn chữ đậm)
-    if (!own && (rearrange || (frameMode && REPEATING_SECTION.test(section.id)))) {
+    // FLF-468 (E2E-1): dự án có sẵn (giữ file gốc) — tính năng / chức năng CR thêm không có slot ⇒ heading mới đúng vị trí bản in
+    // (sau mục cuối của file), không gộp vào thân mục cha (trước "3.1") thành chữ đậm
+    if (!own && (rearrange || ((frameMode || sourceMode) && REPEATING_SECTION.test(section.id)))) {
       inserted.push({ section, index })
       continue
     }
     if (!slot) {
-      if (section.blocks.length || !section.id.startsWith("group:")) unavailable(`No template parent for ${section.id}`)
+      if (section.blocks.length || !section.id.startsWith("group:")) await tolerate([section.id], () => unavailable(`No template parent for ${section.id}`))
       continue
     }
     slot.sections.push(section)
@@ -112,18 +162,22 @@ export async function writeTemplateDocx(
     if (sourceHistory || !added.length) handledSlots.add(history)
   }
   if (history && records.length && !handledSlots.has(history)) {
-    const sourceHistory = history.nodes.find((n) => isW(n, "tbl"))
-    if (!sourceHistory) unavailable("Revision history has no source table")
-    const headers = wKids(wKids(sourceHistory!, "tr")[0], "tc").map((cell) => wAll(cell, "t").map((t) => t.textContent ?? "").join(""))
-    const fieldOf = recordFieldOf
-    if (headers.some((h) => !fieldOf(h))) unavailable("Revision history column has no mapping")
-    const section: RenderedSection = {
-      id: history.section_id, number: "", heading: history.heading.text, level: history.heading.level ?? 1,
-      blocks: [{ type: "table", header: headers.map((text) => [{ text }]), rows: records.map((row) => headers.map((h) => [{ text: row[fieldOf(h)!] }])) }]
-    }
-    const index = history.sections.findIndex((s) => s.id === history.section_id)
-    if (index >= 0) history.sections[index] = section
-    else history.sections.unshift(section)
+    const ok = await tolerate([history.section_id], () => {
+      const sourceHistory = history.nodes.find((n) => isW(n, "tbl"))
+      if (!sourceHistory) unavailable("Revision history has no source table")
+      const headers = wKids(wKids(sourceHistory!, "tr")[0], "tc").map((cell) => wAll(cell, "t").map((t) => t.textContent ?? "").join(""))
+      const fieldOf = recordFieldOf
+      if (headers.some((h) => !fieldOf(h))) unavailable("Revision history column has no mapping")
+      const section: RenderedSection = {
+        id: history.section_id, number: "", heading: history.heading.text, level: history.heading.level ?? 1,
+        blocks: [{ type: "table", header: headers.map((text) => [{ text }]), rows: records.map((row) => headers.map((h) => [{ text: row[fieldOf(h)!] }])) }]
+      }
+      const index = history.sections.findIndex((s) => s.id === history.section_id)
+      if (index >= 0) history.sections[index] = section
+      else history.sections.unshift(section)
+      return true
+    })
+    if (!ok) handledSlots.add(history)
   }
 
   const bodyPattern = blocks.find((b) => b.kind === "paragraph" && !b.cell && b.ordinal > (headings[0]?.ordinal ?? Infinity))?.element
@@ -131,6 +185,30 @@ export async function writeTemplateDocx(
   const styles = await pkg.xml("word/styles.xml")
   const defaultBodyStyle = (styles ? wAll(styles, "style") : []).find((s) => wAttr(s, "type") === "paragraph" && (wAttr(s, "default") === "1" || /^(normal|body text)$/i.test(wAttr(wKid(s, "name"), "val") ?? "")))
   const bodyStyleId = wAttr(defaultBodyStyle, "styleId") ?? undefined
+  /** Đoạn mẫu cho heading cấp `level` khi file chưa có heading cấp đó: style "heading N" / outlineLvl N-1 của mẫu, hoặc heading sâu nhất + outlineLvl. */
+  const headingSampleOfLevel = (level: number): { element: Element; text: string } | undefined => {
+    const style = (styles ? wAll(styles, "style") : []).find(
+      (s) => wAttr(s, "type") === "paragraph" && (new RegExp(`^heading\\s*${level}$`, "i").test(wAttr(wKid(s, "name"), "val") ?? "") || wAttr(wKid(wKid(s, "pPr") ?? s, "outlineLvl"), "val") === String(level - 1))
+    )
+    const p = wEl(xml, "p")
+    const pPr = wEl(xml, "pPr")
+    p.appendChild(pPr)
+    const styleId = wAttr(style, "styleId")
+    if (styleId) {
+      pPr.appendChild(wEl(xml, "pStyle", { val: styleId }))
+      return { element: p, text: "" }
+    }
+    const deepest = [...headings].filter((h) => (h.level ?? 1) < level).sort((a, b) => (b.level ?? 1) - (a.level ?? 1))[0]
+    if (!deepest) return undefined
+    const own = wKid(deepest.element, "pPr")
+    const clone = own ? (own.cloneNode(true) as Element) : pPr
+    for (const old of wKids(clone, "outlineLvl")) clone.removeChild(old)
+    // Thứ tự con của pPr theo schema: outlineLvl đứng trước rPr / sectPr / pPrChange
+    const tail = wKids(clone).find((k) => ["rPr", "sectPr", "pPrChange"].includes(k.localName))
+    clone.insertBefore(wEl(xml, "outlineLvl", { val: String(level - 1) }), tail ?? null)
+    if (clone !== pPr) p.replaceChild(clone, pPr)
+    return { element: p, text: "" }
+  }
   const numbering = await pkg.xml("word/numbering.xml")
   const listFormat = (p: Element): string | null => {
     if (!numbering) return null
@@ -160,14 +238,9 @@ export async function writeTemplateDocx(
           break
         case "heading": out.push(paragraph(xml, [{ text: block.text, bold: true }], ctx.pattern)); break
         case "bullet_list":
-        case "numbered_list": {
-          const listPattern = ctx.paragraphs.find((p) => {
-            const format = listFormat(p)
-            return block.type === "bullet_list" ? format === "bullet" : !!format && format !== "bullet"
-          })
-          block.items.forEach((runs, i) => out.push(paragraph(xml, listPattern ? runs : [{ text: block.type === "bullet_list" ? "• " : `${i + 1}. ` }, ...runs], listPattern ?? ctx.pattern)))
+        case "numbered_list":
+          out.push(...listParagraphs(xml, ctx, listFormat, block.items, block.type === "bullet_list"))
           break
-        }
         case "table": {
           const sourceTable = ctx.tables[ctx.cursor.table++]
           if (sourceTable) {
@@ -183,8 +256,12 @@ export async function writeTemplateDocx(
               out.push(table(xml, block, undefined, ctx.pattern, bodyStyleId))
             }
           }
-          else if (ctx.freeTables) out.push(table(xml, block, undefined, ctx.pattern, bodyStyleId))
-          else out.push(...tableAsParagraphs(xml, block, ctx.pattern))
+          // FLF-468 (lát D, "Cần chốt" #1): mục của mẫu cố định không có bảng nguồn (chưa có bảng, hoặc section có nhiều
+          // bảng hơn bảng nguồn — lưới an toàn của lát B) ⇒ không trải thành đoạn "Nhãn: giá trị" nữa. Bảng từ 3 cột
+          // (thông báo, NFR, rủi ro…) in bảng thật theo kiểu bảng FlintFlow (như mục chèn mới — `freeTables`); bảng 2 cột
+          // (quy tắc, yêu cầu chung) gọn hơn dưới dạng danh sách "<mã> – <nội dung>" theo đúng khuôn danh sách của mẫu.
+          else if (ctx.freeTables || block.header.length >= 3) out.push(table(xml, block, undefined, ctx.pattern, bodyStyleId))
+          else out.push(...listParagraphs(xml, ctx, listFormat, tableRowsAsListItems(block), true))
           break
         }
         case "image": out.push(...await image(pkg, xml, doc, block, drawingIds)); break
@@ -194,6 +271,18 @@ export async function writeTemplateDocx(
   }
   const skipSlot = (slot: typeof slots[number], reason: string): void => {
     console.warn(`[template-docx] Giữ nguyên mục "${slot.heading.text}" của file nền: ${reason}`)
+  }
+  // FLF-468 (lát A): mục của phần tử (chức năng / tính năng / mục riêng) ⇒ xoá cả heading lẫn thân khi CR đã xoá phần
+  // tử đó. Mục cố định của mẫu không bị xoá — chỉ trống dữ liệu, giữ heading + chữ hướng dẫn.
+  const DATA_DRIVEN_SECTION = /^(feature|function|custom):/
+  let sectionsRemoved = false
+  const removeDeletedSlot = (slot: typeof slots[number]): void => {
+    if (DATA_DRIVEN_SECTION.test(slot.section_id)) {
+      for (const node of [slot.heading.element, ...slot.nodes]) node.parentNode?.removeChild(node)
+      sectionsRemoved = true
+    } else {
+      clearToGuidance(xml, slot.heading.element, slot.nodes, [], bodyPatternFor(bodyPattern, bodyStyleId))
+    }
   }
   for (const slot of slots) {
     if (handledSlots.has(slot)) continue
@@ -206,55 +295,63 @@ export async function writeTemplateDocx(
       continue
     }
     if (!slot.sections.some((s) => s.blocks.length || s.id !== slot.section_id)) {
+      if (!slot.sections.length && slot.section_id !== "fixed:I" && sourceOptions.importedSectionIds?.has(slot.section_id)) {
+        removeDeletedSlot(slot)
+        continue
+      }
       if (sourceOptions.stripTemplateText && slot.section_id !== "fixed:I") stripTemplateBody(slot.nodes)
       continue
     }
     // Mục nguyên vẹn so với lúc import ⇒ không đụng node nào của file gốc
     if (keep && slot.sections.every((s) => keep.has(s.id))) continue
-    if (slot.nodes.some((n) => isW(n, "p") && isLayoutParagraph(n) && wAll(n, "t").some((t) => t.textContent?.trim()))) {
-      if (sourceMode) { skipSlot(slot, "chữ chung đoạn với ngắt trang / section"); continue }
-      unavailable(`Body text shares a layout break below ${slot.block_id}`)
-    }
-    // FLF-372: đoạn chỉ chứa ảnh (sơ đồ ngữ cảnh, use case… của file gốc) thay được khi bản in của mục mang lại đủ số ảnh —
-    // bản in Mode 1 giữ ảnh gốc thành khối ảnh; field / sdt / công thức / bookmark lạ vẫn không xoá
-    const opaque = slot.nodes.filter((n) => isW(n, "p") && hasOpaqueContent(n))
-    const pictures = opaque.filter(isPictureOnly)
-    const printedImages = slot.sections.reduce((n, s) => n + s.blocks.filter((b) => b.type === "image").length, 0)
-    // Dự án có sẵn: đoạn có field / bookmark / công thức (chú thích hình "Figure {SEQ}", tham chiếu chéo…) giữ nguyên tại chỗ
-    const preserved = new Set<Element>(sourceMode ? (pictures.length > printedImages ? opaque : opaque.filter((n) => !isPictureOnly(n))) : [])
-    // FLF-419: file là khung mẫu (dự án mới) ⇒ ảnh / OLE nhúng dưới heading là hình mẫu (ERD mẫu của Report3 là OLE) — bỏ khi mục có
-    // nội dung thật; field / sdt / công thức / bookmark lạ vẫn không xoá
-    const templateSamples = sourceOptions.stripTemplateText && !sourceMode
-    if (templateSamples ? opaque.some((n) => !isSampleObject(n)) : !sourceMode && (opaque.length > pictures.length || pictures.length > printedImages)) unavailable(`Source objects or fields cannot be safely replaced below ${slot.block_id}`)
-    const replaceable = slot.nodes.map((node, index) => isW(node, "tbl") || (isW(node, "p") && !isLayoutParagraph(node)) ? index : -1).filter((index) => index >= 0)
-    if (slot.nodes.some((node, index) => isW(node, "p") && isLayoutParagraph(node) && index > replaceable[0] && index < replaceable[replaceable.length - 1])) {
-      if (sourceMode) { skipSlot(slot, "nội dung vắt qua ngắt section"); continue }
-      unavailable(`Source content spans an internal layout boundary below ${slot.block_id}`)
-    }
-    const paragraphs = slot.nodes.filter((n) => isW(n, "p") && !isLayoutParagraph(n) && !preserved.has(n))
-    const tables = slot.nodes.filter((n) => isW(n, "tbl"))
-    const pattern = bodyPatternFor(paragraphs.find((p) => !wKid(wKid(p, "pPr") ?? p, "numPr")) ?? bodyPattern, bodyStyleId)
-    const cursor = { table: 0 }
-    const output: Element[] = []
-    for (const section of slot.sections) {
-      // Descendant data belongs inside the source region, never in invented heading levels.
-      if (section.id !== slot.section_id) output.push(paragraph(xml, [{ text: section.heading, bold: true }], pattern))
-      await writeBlocks(section, { paragraphs, tables, pattern, cursor }, output)
-    }
-    const parent = slot.heading.element.parentNode!
-    // A leading page/section break belongs before the slot's generated content.
-    const ref = slot.nodes.find((node) => isW(node, "tbl") || (isW(node, "p") && !isLayoutParagraph(node) && !preserved.has(node)))
-      ?? (slot.nodes.length ? slot.nodes[slot.nodes.length - 1].nextSibling : slot.heading.element.nextSibling)
-    for (const node of output) parent.insertBefore(node, ref)
-    const replacedTables = new Set(tables.slice(0, cursor.table))
-    for (const node of slot.nodes) {
-      // Breaks and paragraph section properties are layout, even inside a body slot.
-      // An unfilled source table remains part of the template, including its sample rows (FLF-378: trừ mẫu của dự án mới —
-      // bỏ dòng mẫu, giữ hàng tiêu đề).
-      if (preserved.has(node)) continue
-      if (replacedTables.has(node) || (isW(node, "p") && !isLayoutParagraph(node))) parent.removeChild(node)
-      else if (sourceOptions.stripTemplateText && isW(node, "tbl")) stripSampleRows(node)
-    }
+    // Chế độ chịu lỗi: mục không ghi được giữ nguyên slot (chưa chèn gì: output chỉ chèn sau khi mọi khối dựng xong)
+    const filling = slot.sections.filter((s) => !keep?.has(s.id)).map((s) => s.id)
+    await tolerate(filling.length ? filling : [slot.section_id], async () => {
+      if (slot.nodes.some((n) => isW(n, "p") && isLayoutParagraph(n) && wAll(n, "t").some((t) => t.textContent?.trim()))) {
+        if (sourceMode) { skipSlot(slot, "chữ chung đoạn với ngắt trang / section"); return }
+        unavailable(`Body text shares a layout break below ${slot.block_id}`)
+      }
+      // FLF-372: đoạn chỉ chứa ảnh (sơ đồ ngữ cảnh, use case… của file gốc) thay được khi bản in của mục mang lại đủ số ảnh —
+      // bản in Mode 1 giữ ảnh gốc thành khối ảnh; field / sdt / công thức / bookmark lạ vẫn không xoá
+      const opaque = slot.nodes.filter((n) => isW(n, "p") && hasOpaqueContent(n))
+      const pictures = opaque.filter(isPictureOnly)
+      const printedImages = slot.sections.reduce((n, s) => n + s.blocks.filter((b) => b.type === "image").length, 0)
+      // Dự án có sẵn: đoạn có field / bookmark / công thức (chú thích hình "Figure {SEQ}", tham chiếu chéo…) giữ nguyên tại chỗ
+      const preserved = new Set<Element>(sourceMode ? (pictures.length > printedImages ? opaque : opaque.filter((n) => !isPictureOnly(n))) : [])
+      // FLF-419: file là khung mẫu (dự án mới) ⇒ ảnh / OLE nhúng dưới heading là hình mẫu (ERD mẫu của Report3 là OLE) — bỏ khi mục có
+      // nội dung thật; field / sdt / công thức / bookmark lạ vẫn không xoá
+      const templateSamples = sourceOptions.stripTemplateText && !sourceMode
+      if (templateSamples ? opaque.some((n) => !isSampleObject(n)) : !sourceMode && (opaque.length > pictures.length || pictures.length > printedImages)) unavailable(`Source objects or fields cannot be safely replaced below ${slot.block_id}`)
+      const replaceable = slot.nodes.map((node, index) => isW(node, "tbl") || (isW(node, "p") && !isLayoutParagraph(node)) ? index : -1).filter((index) => index >= 0)
+      if (slot.nodes.some((node, index) => isW(node, "p") && isLayoutParagraph(node) && index > replaceable[0] && index < replaceable[replaceable.length - 1])) {
+        if (sourceMode) { skipSlot(slot, "nội dung vắt qua ngắt section"); return }
+        unavailable(`Source content spans an internal layout boundary below ${slot.block_id}`)
+      }
+      const paragraphs = slot.nodes.filter((n) => isW(n, "p") && !isLayoutParagraph(n) && !preserved.has(n))
+      const tables = slot.nodes.filter((n) => isW(n, "tbl"))
+      const pattern = bodyPatternFor(paragraphs.find((p) => !wKid(wKid(p, "pPr") ?? p, "numPr")) ?? bodyPattern, bodyStyleId)
+      const cursor = { table: 0 }
+      const output: Element[] = []
+      for (const section of slot.sections) {
+        // Descendant data belongs inside the source region, never in invented heading levels.
+        if (section.id !== slot.section_id) output.push(paragraph(xml, [{ text: section.heading, bold: true }], pattern))
+        await writeBlocks(section, { paragraphs, tables, pattern, cursor }, output)
+      }
+      const parent = slot.heading.element.parentNode!
+      // A leading page/section break belongs before the slot's generated content.
+      const ref = slot.nodes.find((node) => isW(node, "tbl") || (isW(node, "p") && !isLayoutParagraph(node) && !preserved.has(node)))
+        ?? (slot.nodes.length ? slot.nodes[slot.nodes.length - 1].nextSibling : slot.heading.element.nextSibling)
+      for (const node of output) parent.insertBefore(node, ref)
+      const replacedTables = new Set(tables.slice(0, cursor.table))
+      for (const node of slot.nodes) {
+        // Breaks and paragraph section properties are layout, even inside a body slot.
+        // An unfilled source table remains part of the template, including its sample rows (FLF-378: trừ mẫu của dự án mới —
+        // bỏ dòng mẫu, giữ hàng tiêu đề).
+        if (preserved.has(node)) continue
+        if (replacedTables.has(node) || (isW(node, "p") && !isLayoutParagraph(node))) parent.removeChild(node)
+        else if (sourceOptions.stripTemplateText && isW(node, "tbl")) stripSampleRows(node)
+      }
+    })
   }
   /**
    * FLF-416 chế độ 4: chèn mục FPT soạn thêm thành heading mới trước heading kế tiếp của file (theo thứ tự bản in), rồi chuyển
@@ -296,9 +393,11 @@ export async function writeTemplateDocx(
       const next = doc.sections.slice(index + 1).map((s) => slotOf.get(slotIdOf(s.id))).find((s) => s && !skip.has(s.heading.element) && s.heading.element.parentNode)
       const ref = next?.heading.element ?? bodySectPr
       const parent = next?.heading.element.parentNode ?? body
-      const output: Element[] = [insertedHeading(section)]
-      await writeBlocks(section, { paragraphs: [], tables: [], pattern, cursor: { table: 0 }, freeTables: true }, output)
-      for (const node of output) parent.insertBefore(node, ref)
+      await tolerate([section.id], async () => {
+        const output: Element[] = [insertedHeading(section)]
+        await writeBlocks(section, { paragraphs: [], tables: [], pattern, cursor: { table: 0 }, freeTables: true }, output)
+        for (const node of output) parent.insertBefore(node, ref)
+      })
     }
   }
 
@@ -341,17 +440,34 @@ export async function writeTemplateDocx(
   const insertedHeading = (section: RenderedSection): Element => {
     const kind = REPEATING_SECTION.exec(section.id)?.[1]
     const frameSample = kind ? frameSlots.filter((s) => s.section_id.startsWith(`${kind}:`) && (s.heading.level ?? 1) === section.level).pop()?.heading : undefined
+    // FLF-468: ưu tiên heading cùng loại (tính năng / chức năng) cùng cấp của file hơn heading cùng cấp bất kỳ ("5.5 Glossary")
+    const kindSample = kind ? slots.filter((s) => s.section_id.startsWith(`${kind}:`) && (s.heading.level ?? 1) === section.level).pop()?.heading : undefined
     const sameLevel = headings.filter((h) => (h.level ?? 1) === section.level)
-    const sample = frameSample ?? sameLevel[sameLevel.length - 1]
+    const found = frameSample ?? kindSample ?? sameLevel[sameLevel.length - 1]
+    // File chưa có heading nào ở cấp này (mẫu chỉ dùng Heading 1–3): heading theo style "heading N" của mẫu; mẫu không có style đó ⇒
+    // theo heading sâu nhất của file + outlineLvl — vẫn là heading (vào mục lục), không rơi về đoạn thường in đậm
+    const sample = found ?? headingSampleOfLevel(section.level)
     if (!sample) return paragraph(xml, [{ text: section.heading, bold: true }], bodyPatternFor(bodyPattern, bodyStyleId))
-    const typed = /^\s*(\d+(\.\d+)*\.?|[IVXLC]+\.)\s+/.test(sample.text)
+    const typed = /^\s*(\d+(\.\d+)*\.?|[IVXLC]+\.)\s+/.test(found ? sample.text : (headings.find((h) => h.text.trim())?.text ?? ""))
     const text = typed && section.number ? `${section.number} ${section.heading}` : section.heading
     const heading = paragraph(xml, [{ text }], sample.element)
     for (const pr of wAll(heading, "sectPr")) pr.parentNode?.removeChild(pr)
     return heading
   }
   if (rearrange) await rearrangeLayout()
-  else if (frameMode && (await fillTemplateFrames())) await requestFieldUpdate(pkg)
+  else if (frameMode) { if (await fillTemplateFrames()) await requestFieldUpdate(pkg) }
+  else if (inserted.length) {
+    // FLF-468 (E2E-1): heading mới của mục lặp ở chế độ giữ file gốc ⇒ mục lục tính lại khi mở file (FLF-413: chèn thì cập nhật)
+    const body = wKid(xml.documentElement, "body")
+    if (body) {
+      await insertSections(body, wKids(body, "sectPr")[0] ?? null, new Set())
+      await requestFieldUpdate(pkg)
+    }
+  }
+  // FLF-468 (lát A): heading bị xoá mang theo bookmark `_Toc` của nó — mục lục field phải tính lại khi mở để không còn
+  // dòng trỏ vào mục đã mất.
+  const renumbered = renumberKeptHeadings(xml, slots)
+  if ((sectionsRemoved || renumbered) && !(rearrange || frameMode)) await requestFieldUpdate(pkg)
   // Mẫu để điền: thay chữ giữ chỗ của bìa. Dự án có sẵn: bìa là của file đã viết ⇒ giữ nguyên
   if (!sourceMode) replacePlaceholders(xml, { "[Project name]": doc.projectName, "[Version]": doc.version, "[Date]": doc.generatedAt.slice(0, 10) })
   // Import-only anchors are useful while resolving slots, but untouched source
@@ -359,7 +475,7 @@ export async function writeTemplateDocx(
   const addedIds = new Set(wAll(xml, "bookmarkStart").filter((b) => !originalBookmarkIds.has(wAttr(b, "id"))).map((b) => wAttr(b, "id")))
   for (const local of ["bookmarkStart", "bookmarkEnd"]) for (const bookmark of wAll(xml, local)) if (addedIds.has(wAttr(bookmark, "id"))) bookmark.parentNode?.removeChild(bookmark)
   const lineage = exportLineage(doc)
-  await writeStamp(pkg, { project_id: doc.projectId, version: doc.version, source: doc.source, base_version: lineage.base, kind: lineage.release ? "release" : "draft" })
+  await writeStamp(pkg, { project_id: doc.projectId, version: doc.version, source: doc.source, base_version: lineage.base, kind: lineage.release ? "release" : "draft", project_code: projectCode(doc.projectId) })
   return pkg.toBuffer()
 }
 
@@ -386,6 +502,43 @@ const replaceInParagraph = (p: Element, needle: string, value: string): void => 
     t.textContent = text.slice(0, Math.max(0, start - from)) + (from <= start ? value : "") + text.slice(Math.min(text.length, end - from))
     t.setAttribute("xml:space", "preserve")
   }
+}
+
+const TYPED_DECIMAL = /^(\d{1,2}(?:\.\d{1,2})*)\.?\s/
+const DECIMAL_NUMBER = /^\d+(\.\d+)*$/
+
+/**
+ * Heading giữ từ file nền mang số gõ tay cũ: số của bản in khác (xoá / chèn mục ở file đánh số đều ⇒ anh em phía sau dồn số,
+ * "3.3" ⇒ "3.2") thì ghi số mới lên heading; đoạn / ô có chữ đúng bằng nguyên chữ heading cũ (cột "Chức năng" của bảng mô tả
+ * màn hình) đổi theo — chữ cũ trùng giữa nhiều heading thì không đổi ô. Chỉ số thập phân; heading Word tự đánh số không có số
+ * trong chữ nên không đụng. Trả `true` khi có heading đổi số (mục lục cần tính lại).
+ */
+const renumberKeptHeadings = (xml: Document, slots: readonly { section_id: string; heading: { element: Element }; sections: readonly RenderedSection[] }[]): boolean => {
+  const changed = new Map<string, string>()
+  const dup = new Set<string>()
+  const headingEls = new Set(slots.map((s) => s.heading.element))
+  for (const slot of slots) {
+    const el = slot.heading.element
+    if (!el.parentNode) continue
+    const number = slot.sections.find((s) => s.id === slot.section_id)?.number ?? ""
+    if (!DECIMAL_NUMBER.test(number)) continue
+    const before = paragraphText(el)
+    const typed = TYPED_DECIMAL.exec(before)?.[1]
+    if (!typed || typed === number) continue
+    replaceInParagraph(el, typed, number)
+    const after = paragraphText(el)
+    if (changed.has(before) && changed.get(before) !== after) dup.add(before)
+    changed.set(before, after)
+  }
+  for (const d of dup) changed.delete(d)
+  if (!changed.size) return false
+  for (const p of wAll(xml, "p")) {
+    if (headingEls.has(p)) continue
+    const text = paragraphText(p)
+    const next = changed.get(text)
+    if (next) replaceInParagraph(p, text, next)
+  }
+  return true
 }
 
 /** FLF-378: bảng mẫu giữ hàng tiêu đề (+ style), bỏ dòng mẫu / ví dụ bên dưới. */
@@ -563,11 +716,36 @@ function paragraph(xml: Document, runs: InlineRun[], source?: Element): Element 
   return p
 }
 
-function tableAsParagraphs(xml: Document, block: Extract<Block, { type: "table" }>, pattern?: Element): Element[] {
-  const headers = block.header.map((cell) => cell.map((r) => r.text).join(""))
-  return block.rows.map((cells) => paragraph(xml, cells.flatMap((runs, i) => [
-    ...(i ? [{ text: "\n" }] : []), ...(headers[i] ? [{ text: `${headers[i]}: `, bold: true }] : []), ...runs
-  ]), pattern))
+/**
+ * Khối danh sách / số thứ tự theo đúng khuôn danh sách của mẫu (kiểu đánh số của một đoạn trong `ctx.paragraphs`), không
+ * có thì tự thêm dấu đầu dòng / số thứ tự — dùng chung cho `bullet_list`/`numbered_list` và danh sách dựng từ bảng
+ * (FLF-468 lát D).
+ */
+function listParagraphs(
+  xml: Document,
+  ctx: { paragraphs: readonly Element[]; pattern?: Element },
+  listFormat: (p: Element) => string | null,
+  items: readonly InlineRun[][],
+  bullet: boolean
+): Element[] {
+  const listPattern = ctx.paragraphs.find((p) => {
+    const format = listFormat(p)
+    return bullet ? format === "bullet" : !!format && format !== "bullet"
+  })
+  return items.map((runs, i) => paragraph(xml, listPattern ? runs : [{ text: bullet ? "• " : `${i + 1}. ` }, ...runs], listPattern ?? ctx.pattern))
+}
+
+/**
+ * FLF-468 (lát D): bảng 2 cột (mã + nội dung — quy tắc nghiệp vụ, yêu cầu chung) mà mẫu không có bảng nguồn ⇒ mỗi hàng
+ * một dòng danh sách "<mã> – <nội dung>" (cột đầu làm mã/nhãn đậm); bảng 1 cột ⇒ chỉ nội dung, không thêm dấu "–".
+ */
+function tableRowsAsListItems(block: Extract<Block, { type: "table" }>): InlineRun[][] {
+  return block.rows.map((cells) => {
+    const [first, ...rest] = cells
+    const label = (first ?? []).map((r) => r.text).join("").trim()
+    const content = rest.flatMap((runs, i) => (i > 0 && runs.some((r) => r.text.trim()) ? [{ text: " " }] : []).concat(runs))
+    return label && content.length ? [{ text: `${label} – `, bold: true }, ...content] : label ? [{ text: label, bold: true }] : content
+  })
 }
 
 /** Reuse the import's explicit field paths; no fuzzy header matching or overflow cells. */

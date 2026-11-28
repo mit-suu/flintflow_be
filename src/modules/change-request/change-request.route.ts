@@ -53,10 +53,17 @@ const router = Router()
  *                 maxItems: 5
  *                 description: "Mode 1 v3 phase 7 — đoạn văn bản nguồn dán ở 3.1; file upload sau qua /materials"
  *                 items: { type: object, required: [name, text], properties: { name: { type: string }, text: { type: string } } }
+ *               flag_ids:
+ *                 type: array
+ *                 minItems: 1
+ *                 maxItems: 50
+ *                 description: "FLF-445 — nhóm cờ mở CR này sửa; phần tử / mục của cờ thành đích C-3"
+ *                 items: { type: string }
  *     responses:
  *       201: { $ref: '#/components/responses/CrDetail' }
- *       400: { description: CR_SOURCE_REQUIRED, VALIDATION_ERROR }
- *       409: { description: CR_REQUIRES_BASELINE }
+ *       400: { description: "CR_SOURCE_REQUIRED, VALIDATION_ERROR, FLAG_NOT_OPEN" }
+ *       404: { description: FLAG_NOT_FOUND }
+ *       409: { description: "CR_REQUIRES_BASELINE, PACKAGE_PENDING, CR_OWN_OPEN" }
  *   get:
  *     summary: Danh sách change request, mới nhất trước
  *     tags: [Change requests (mode 1)]
@@ -110,6 +117,20 @@ router.get("/:projectId/change-requests/pending-sections", authMiddleware, crCon
  */
 router.post("/:projectId/documents/:documentId/extract", authMiddleware, crController.extractRequirements)
 router.get("/:projectId/documents/:documentId/extract", authMiddleware, crController.getExtraction)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/documents/{documentId}/extract/estimate:
+ *   get:
+ *     summary: FLF-449 — số lô + credit dự kiến của lượt rút yêu cầu (tài liệu dài chia lô, mỗi lô một lượt AI)
+ *     tags: [Change requests (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200: { description: "`extractionEstimateSchema` { batches, credits, cost_per_batch }" }
+ *       404: { description: DOCUMENT_NOT_FOUND }
+ */
+router.get("/:projectId/documents/:documentId/extract/estimate", authMiddleware, crController.estimateExtraction)
 
 /**
  * @swagger
@@ -397,6 +418,47 @@ router.patch("/:projectId/change-requests/:crId/locations/:locId", authMiddlewar
 
 /**
  * @swagger
+ * /api/v1/projects/{projectId}/change-requests/{crId}/locations/{locId}/diagram-preview.png:
+ *   get:
+ *     summary: "§4.13 — PNG sơ đồ FlintFlow sẽ thay ảnh gốc ở vị trí sơ đồ gốc, vẽ từ dữ liệu sau CR (chạy khô, không ghi, không gọi AI)"
+ *     tags: [Change requests (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/Mode1ProjectId'
+ *       - $ref: '#/components/parameters/CrId'
+ *       - { in: path, name: locId, required: true, schema: { type: string } }
+ *       - { in: query, name: kind, required: true, schema: { type: string, enum: [context, usecase, screen_flow, erd, sequence, activity, deployment] } }
+ *       - { in: query, name: owner, schema: { type: string }, description: "Chủ của sơ đồ gắn phần tử (sequence ⇒ function, activity ⇒ use case)" }
+ *       - { in: query, name: part, schema: { type: integer, default: 0 }, description: "Phần thứ mấy (use case tách theo feature); tổng số phần ở header X-Diagram-Parts" }
+ *       - { in: query, name: variant, schema: { type: string, enum: [after, original], default: after }, description: "original = ảnh gốc của file ở khối đó" }
+ *     responses:
+ *       200: { description: "image/png | image/jpeg; header X-Diagram-Parts = số phần" }
+ *       404: { description: "CR_LOCATION_NOT_FOUND (vị trí không giữ ảnh gốc loại đó), DIAGRAM_PREVIEW_FAILED (không có dữ liệu để vẽ / không đọc được ảnh gốc)" }
+ *       422: { description: "DIAGRAM_PREVIEW_FAILED — máy chủ vẽ hình chưa sẵn sàng / sơ đồ lỗi bố cục" }
+ */
+router.get("/:projectId/change-requests/:crId/locations/:locId/diagram-preview.png", authMiddleware, crController.locationDiagramPreview)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/change-requests/{crId}/document-diff:
+ *   get:
+ *     summary: "FLF-495 (#23b) — đề xuất của CR tô lên tài liệu: các mục có thay đổi, block đầy đủ của bản sau CR kèm `change` (chạy khô, chỉ đọc, không gọi AI, không vẽ hình)"
+ *     tags: [Change requests (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/Mode1ProjectId'
+ *       - $ref: '#/components/parameters/CrId'
+ *     responses:
+ *       200:
+ *         description: "{ cr_id, spine_version, change_count, sections[] } - mỗi mục { id, number, heading, level, change, blocks[] }; block { block, change, before?, location_id?, rows?, items? }"
+ *       404: { description: "Không thấy CR / dự án (SPINE_NOT_FOUND khi chưa có dữ liệu tài liệu)" }
+ */
+router.get("/:projectId/change-requests/:crId/document-diff", authMiddleware, crController.documentDiff)
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/change-requests/{crId}/locations/{locId}/owner-step-draft:
  *   post:
  *     summary: "Soạn lại đề xuất một vị trí theo hướng của BA (BPMN 3.9; phase 8: nút \"Sửa lại\" trong chat) — skill step sở hữu (nếu có), chỉ ghi đề xuất (manual = true); ready_to_submit ⇒ verifying"
@@ -496,6 +558,27 @@ router.post("/:projectId/change-requests/:crId/groups/:gid/decision", authMiddle
  *       409: { description: CR_INVALID_TRANSITION }
  */
 router.post("/:projectId/change-requests/:crId/close", authMiddleware, crController.close)
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/change-requests/{crId}/revert:
+ *   post:
+ *     summary: Hoàn tác một CR đã ghi = tạo CR mới (nguồn revert) dựng từ giá trị trước của các thay đổi, rồi kiểm C-5
+ *     tags: [Change requests (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/Mode1ProjectId'
+ *       - $ref: '#/components/parameters/CrId'
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [requester], properties: { requester: { type: string } } }
+ *     responses:
+ *       201: { $ref: '#/components/responses/CrDetail' }
+ *       409: { description: "CR_REVERT_NOT_WRITTEN, CR_REVERT_NOTHING, CR_OWN_OPEN, PACKAGE_PENDING" }
+ */
+router.post("/:projectId/change-requests/:crId/revert", authMiddleware, crController.revertCr)
 router.post("/:projectId/change-requests/:crId/cancel", authMiddleware, crController.cancel)
 
 export default router

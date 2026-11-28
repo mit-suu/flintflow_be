@@ -50,6 +50,18 @@ describe("reassignDuplicateIds", () => {
     expect(b.proposal!.spine_ops[0]).toMatchObject({ value: { id: "UC-127" } })
   })
 
+  it("FLF-474: model tự đặt mã đã bị xoá của dự án (UC34) ⇒ đổi sang mã chưa từng dùng, tham chiếu trong op add khác đổi theo", () => {
+    const s = createEmptySpine({ name: "Chợ Việt" })
+    s.use_cases.push(...(Array.from({ length: 33 }, (_, i) => ({ id: `UC${String(i + 1).padStart(2, "0")}`, name: `UC${i + 1}` })) as never[]))
+    const retired = new Map([["use_cases", ["UC34"]]])
+    const uc = loc("L090", [{ op: "add", path: "use_cases[]", value: { id: "UC34", name: "Chat với shop" } }])
+    const ref = loc("L091", [{ op: "add", path: "use_cases[]", value: { id: "UC40", name: "Thanh toán", extends: ["UC34"] } }])
+    const changed = reassignDuplicateIds(s, [uc, ref], retired)
+    expect(changed).toEqual([uc, ref])
+    expect(uc.proposal!.spine_ops[0]).toMatchObject({ value: { id: "UC35", name: "Chat với shop" } })
+    expect(ref.proposal!.spine_ops[0]).toMatchObject({ value: { id: "UC40", extends: ["UC35"] } })
+  })
+
   it("id không trùng, id tạm, không id, vị trí không phải edit ⇒ không đổi gì", () => {
     const ops = [
       { op: "add", path: "use_cases[]", value: { id: "UC-200", name: "A" } },

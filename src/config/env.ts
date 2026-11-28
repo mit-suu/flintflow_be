@@ -64,6 +64,12 @@ const envSchema = z.object({
   // cùng site (BE ở subdomain) ⇒ giữ `lax` và đặt COOKIE_DOMAIN=.flintflow.io.vn
   COOKIE_SAME_SITE: z.enum(["lax", "strict", "none"]).default("lax"),
   COOKIE_DOMAIN: z.string().default(""),
+  /**
+   * FLF-475: khoảng ân hạn (ms) sau khi một refresh token bị XOAY mà vẫn còn bị gửi lại (phản hồi bị mất
+   * giữa đường, F5 liên tục, request song song) — `session.service.ts` xoay tiếp trong CÙNG họ phiên thay
+   * vì coi là đánh cắp. Vượt khoảng này mới tính là reuse thật (thu hồi cả họ phiên).
+   */
+  REFRESH_REUSE_GRACE_MS: z.coerce.number().int().nonnegative().default(30000),
 
   SMTP_HOST: z.string().default("smtp.gmail.com"),
   SMTP_PORT: z.string().default("465"),
@@ -80,6 +86,14 @@ const envSchema = z.object({
     .string()
     .default("")
     .refine((v) => v === "" || isValidSecretBoxKey(v), { message: "phải là 32 byte mã hoá base64 (openssl rand -base64 32)" }),
+
+  // Trợ lý Google Docs (chat sửa thẳng file Google Docs) + endpoint MCP `/mcp/google-docs`. Mặc định tắt: chỗ sửa trên
+  // Google Docs không quay về FlintFlow (business-flow §4) nên tài liệu trong app lệch với file trên Drive. Tắt ⇒ 503
+  // GOOGLE_DOCS_AGENT_DISABLED (`modules/google/docs-agent/docs-agent.guard.ts`); nhập / xuất Google Docs không bị ảnh hưởng.
+  GOOGLE_DOCS_AGENT_ENABLED: z
+    .string()
+    .default("false")
+    .transform((v) => v === "true" || v === "1"),
 
   CLOUDINARY_CLOUD_NAME: z.string().default(""),
   CLOUDINARY_API_KEY: z.string().default(""),
@@ -116,6 +130,9 @@ const envSchema = z.object({
   EMBEDDING_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
   /** Số ứng viên vector tối đa C-3 lấy thêm, và điểm tối thiểu (`vectorSearchScore` cosine của Atlas, 0..1). */
   CR_VECTOR_TOP_K: z.coerce.number().int().min(1).max(200).default(20),
+  /** FLF-487: luồng SSE `GET /projects/:id/events` — nhịp ping giữ kết nối qua proxy, và thời gian sống tối đa (hết ⇒ FE nối lại với token mới). */
+  PROJECT_EVENTS_PING_MS: z.coerce.number().int().min(1000).default(25000),
+  PROJECT_EVENTS_MAX_MS: z.coerce.number().int().min(10000).default(600000),
   CR_VECTOR_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.82),
 
   // ─── Knowledge RAG (FLF-267, `modules/knowledge/`, docs/ops.md "Knowledge RAG") ───────────
@@ -156,11 +173,22 @@ const envSchema = z.object({
    */
   REFERENCE_MAX_TOKENS_PER_UPLOAD: z.coerce.number().int().min(1000).default(100000),
 
-  // S-9.2 Quality Lens bằng LLM — mặc định TẮT (Phases §9.1, hoãn vì ngân sách).
-  REVIEW_LLM_ENABLED: z
+  // FLF-466 P08: dải số màn ước tính sau Approve Brief = hệ số × số đầu vào có ở S-1 (goals, other_requirements, mục tính năng).
+  RUN_ESTIMATE_SCREENS_PER_INPUT_MIN: z.coerce.number().positive().default(1.5),
+  RUN_ESTIMATE_SCREENS_PER_INPUT_MAX: z.coerce.number().positive().default(2.5),
+
+  // FLF-449 việc 5, 6: kiểm AI là một phần luồng (business-flow 71, 131-138) ⇒ BẬT mặc định; cờ chỉ để tắt khẩn.
+  // Tắt ⇒ bước trả `skipped`, ước tính credit tính 0.
+  /** S-9.2 Soát chất lượng bằng AI. */
+  QUALITY_LENS_ENABLED: z
     .string()
-    .default("false")
-    .transform((v) => v === "true" || v === "1"),
+    .default("true")
+    .transform((v) => !(v === "false" || v === "0")),
+  /** S-8.4 Rà nhất quán bằng AI (trùng nghĩa, thuật ngữ lệch, thiếu chỗ liệt kê). */
+  CONSISTENCY_LLM_ENABLED: z
+    .string()
+    .default("true")
+    .transform((v) => !(v === "false" || v === "0")),
 
   // ─── PlantUML (render diagram phía server, Phases §7.1) ───────────
   // Self-host: `docker compose up -d plantuml`. Ở production PlantUML là một
@@ -216,7 +244,7 @@ const envSchema = z.object({
    */
   IMPORT_AI_RETRY_BACKOFF_MS: z
     .string()
-    .default("15000,45000,90000")
+    .default("5000,15000,30000")
     .transform((v) => v.split(",").map((x) => x.trim()).filter(Boolean).map(Number))
     .refine((v) => v.every((n) => Number.isFinite(n) && n >= 0), { message: "danh sách số ms ≥ 0, cách nhau dấu phẩy" }),
   /**
@@ -234,6 +262,8 @@ const envSchema = z.object({
    * trích × giá trị này; driver `bullmq` = `JOB_IMPORT_CONCURRENCY` × giá trị này.
    */
   IMPORT_EXTRACT_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(4),
+  /** Số lô kiểm tra AI (1.11) gọi cùng lúc trong một lượt kiểm tra sau baseline 0.1 (1 = nối tiếp từng lô). */
+  IMPORT_CHECK_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(3),
   /** Số job import (I-4 / finalize, mỗi job vài phút gọi AI) một worker chạy song song. */
   JOB_IMPORT_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(2),
   /**

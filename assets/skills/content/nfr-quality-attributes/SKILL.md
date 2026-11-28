@@ -1,7 +1,7 @@
 ---
 skill_id: nfr-quality-attributes
 kind: content
-version: 0.3.0
+version: 0.4.0
 description: "S-6.1-6.5 external interfaces and quality attributes; reliability and performance carry a metric and a threshold"
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -84,6 +84,7 @@ retention periods, key rotation intervals, audit-log horizons.
 
 ## Rules
 
+0. Read the Brief notes and the high-level rules before you say the user "has not said": a retention period (records kept 10 years, then anonymised), a cancellation window or a hold time already given is the threshold, not an assumption.
 1. Only the category of the current step; ids continue the existing sequence (`draft-to-ops` rule 5).
 2. `priority` stays `null` - MoSCoW is assigned at S-9.4.
 3. `metric`/`threshold` are omitted entirely for `descriptive` rows, never set to `""`.
@@ -91,6 +92,7 @@ retention periods, key rotation intervals, audit-log horizons.
 5. English values, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).
 6. No number from the user: take the table default plus an `assumptions[]` entry (`draft-to-ops`
    rule 10).
+7. Every NFR row you add carries `source_ref`: a short English note on where it comes from (the brief, a user answer, a reference document and its passage, or who asked). Never invent a source; none known ⇒ "User request in this step".
 
 ## Example (S-6.4, production × high)
 

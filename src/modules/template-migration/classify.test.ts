@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { classify, columnIdentity, decidableItems, missingAfterMoves, sameColumns, settleDecisions, tableShapesBySection, type TableShape, type TableShapes } from "./classify.js"
+import { classify, columnIdentity, decidableItems, missingAfterMoves, readChoice, sameColumns, settleDecisions, tableShapesBySection, withSuggestedDecisions, type TableShape, type TableShapes } from "./classify.js"
 import { pairSections, type NewHeading, type OldHeading } from "./pair-sections.js"
 import type { EditedSection } from "./edited-since.js"
 
@@ -42,7 +42,13 @@ describe("classify — 4 nhóm cho một lần đổi mẫu v1 → v2", () => {
 
   it("mục thừa: giữ / xoá / chuyển vào mục thiếu; chuyển vào mục có cấu trúc cần AI", () => {
     const { groups } = run(oldDoc, newDoc, { oldTables, newTables })
-    expect(groups.extra[0]).toMatchObject({ id: "e:custom:c2", choices: ["keep_custom", "delete", "move_to:n4", "move_to:n5"], ai_choices: ["move_to:n5"], decision_required: true })
+    // Mọi mục của mẫu đích nhận được (kể cả mục đã có cặp: phần gộp nối sau nội dung đang có)
+    expect(groups.extra[0]).toMatchObject({
+      id: "e:custom:c2",
+      choices: ["keep_custom", "drop_from_print", "move_to:n0", "move_to:n1", "move_to:n2", "move_to:n3", "move_to:n4", "move_to:n5"],
+      ai_choices: ["move_to:n0", "move_to:n1", "move_to:n2", "move_to:n5"],
+      decision_required: true
+    })
   })
 
   it("đổi cột bảng chỉ là đổi thứ tự ⇒ vẫn khớp", () => {
@@ -122,7 +128,7 @@ describe("classify — heading nhóm", () => {
 })
 
 describe("classify — heading nhóm của mẫu đích và mục nhận nội dung chuyển vào (test tay 11/11)", () => {
-  const oldDoc = [old("fixed:1", "1. Product Overview", 1), old("fixed:4.2.4", "4.2.4 Domain-Specific Attributes", 2), old("custom:c9", "5.9 Team Notes", 2)]
+  const oldDoc = [old("fixed:1", "1. Product Overview", 1), old("fixed:4.2.3", "4.2.3 Performance Requirements", 2), old("custom:c9", "5.9 Team Notes", 2)]
   const newDoc = [
     neu(0, "II. Software Requirement Specification", "unmapped", { level: 1 }),
     neu(1, "1. Product Overview", "fixed:1", { level: 2 }),
@@ -130,16 +136,18 @@ describe("classify — heading nhóm của mẫu đích và mục nhận nội d
     neu(3, "Appendix", "unmapped", { level: 2 })
   ]
 
-  it("heading nhóm (heading sau sâu hơn) không cần viết và không là đích chuyển vào; heading lá vẫn cần viết", () => {
+  it("heading nhóm (heading sau sâu hơn) không cần viết, vẫn chọn tay được (thành mục con cuối của nhóm); heading lá vẫn cần viết", () => {
     const { groups } = run(oldDoc, newDoc)
     expect(groups.missing.map((m) => [m.heading_text, m.needs_content])).toEqual([
       ["II. Software Requirement Specification", false],
       ["4.2.4 …", true],
       ["Appendix", true]
     ])
-    expect(groups.extra.find((e) => e.old_key === "custom:c9")?.choices).not.toContain("move_to:n0")
+    expect(groups.extra.find((e) => e.old_key === "custom:c9")?.choices).toContain("move_to:n0")
+    // Heading nhóm có mục con không bao giờ là đích gợi ý khi có mục con hợp hơn
+    expect(groups.extra.find((e) => e.old_key === "custom:c9")?.suggested).not.toBe("move_to:n0")
     // Mục khung chuyển chỗ in không gọi AI ⇒ không có lựa chọn AI (không nhãn "dùng AI", không tính credit)
-    expect(groups.extra.find((e) => e.old_key === "fixed:4.2.4")?.ai_choices).toEqual([])
+    expect(groups.extra.find((e) => e.old_key === "fixed:4.2.3")?.ai_choices).toEqual([])
   })
 
   it("không biết cấp heading ⇒ giữ như cũ (cần viết)", () => {
@@ -198,10 +206,19 @@ describe("quyết định", () => {
     expect(items.get("s:fixed:2.1")).toMatchObject({ group: "edited_since", required: false, default: "keep" })
   })
 
-  it("settleDecisions: thiếu quyết định bắt buộc ⇒ undecided; quyết định sai nhóm bị loại", () => {
-    const r = settleDecisions(groups, [{ id: "e:custom:c2", choice: "delete" }, { id: "c:table_columns:fixed:5.1", choice: "keep_custom" }, { id: "m:fixed:1", choice: "keep" }])
-    expect(r.decisions).toEqual([{ id: "e:custom:c2", choice: "delete" }])
+  it("settleDecisions: bản ghi chưa có gợi ý thiếu quyết định bắt buộc ⇒ undecided; quyết định sai nhóm bị loại", () => {
+    // Lần đổi mẫu mở từ trước khi có gợi ý: mục không mang `suggested` ⇒ BA phải chọn như luồng cũ
+    const legacy = { ...groups, extra: groups.extra.map(({ suggested: _s, suggested_reason: _r, confidence: _c, ...e }) => e), conflict: groups.conflict.map(({ suggested: _s, suggested_reason: _r, confidence: _c, ...c }) => c) }
+    const r = settleDecisions(legacy, [{ id: "e:custom:c2", choice: "delete" }, { id: "c:table_columns:fixed:5.1", choice: "keep_custom" }, { id: "m:fixed:1", choice: "keep" }])
+    // FLF-466: nhóm Thừa không còn xoá — quyết định `delete` đã lưu đọc thành drop_from_print
+    expect(r.decisions).toEqual([{ id: "e:custom:c2", choice: "drop_from_print" }])
     expect(r.undecided).toEqual(["c:table_columns:fixed:5.1"])
+  })
+
+  it("mục có lựa chọn chọn sẵn chắc chắn không nằm trong undecided; withSuggestedDecisions điền lựa chọn đó", () => {
+    expect(settleDecisions(groups, []).undecided).toEqual([])
+    const filled = withSuggestedDecisions(groups, [{ id: "e:custom:c2", choice: "keep_custom" }], (id, choice) => ({ id, choice }))
+    expect(filled).toEqual([{ id: "e:custom:c2", choice: "keep_custom" }, { id: "c:table_columns:fixed:5.1", choice: "map_by_header" }])
   })
 })
 
@@ -248,5 +265,41 @@ describe("so cột bảng giữa hai phía", () => {
     const newDoc = [neu(0, "5.1 Business Rules", "fixed:5.1")]
     const { groups } = run(oldDoc, newDoc, { oldTables: tables({ "fixed:5.1": [shape("h:br id", "h:business rule")] }), newTables: tables({ "fixed:5.1": [shape("h:br id")] }) })
     expect(groups.conflict[0].old_columns).toEqual([["br id", "business rule"]])
+  })
+})
+
+describe("FLF-466: nhóm Thừa không còn xoá; conflict bảng giữ delete", () => {
+  const oldDoc = [old("fixed:2.1", "2.1 Actors", 2), old("custom:c2", "9 Legacy Interfaces", 1)]
+  const newDoc = [neu(0, "2.1 Actors", "fixed:2.1")]
+  const oldTables = tables({ "fixed:2.1": [shape("h:actor", "h:description")] })
+
+  it("mục Thừa chữ tự do không có delete; conflict bảng không có bảng đích vẫn có delete", () => {
+    const { groups } = run(oldDoc, newDoc, { oldTables, newTables: tables({}) })
+    expect(groups.extra.flatMap((e) => e.choices)).not.toContain("delete")
+    expect(groups.conflict[0].choices).toContain("delete")
+  })
+
+  it("lần đổi mẫu đang mở còn `delete` trong choices / quyết định của mục Thừa ⇒ đọc thành drop_from_print", () => {
+    const { groups } = run(oldDoc, newDoc, { oldTables, newTables: tables({}) })
+    const legacy = { ...groups, extra: groups.extra.map((e) => ({ ...e, choices: [...e.choices, "delete"] })) }
+    expect(decidableItems(legacy).get("e:custom:c2")?.choices).not.toContain("delete")
+    expect(readChoice(legacy, "e:custom:c2", "delete")).toBe("drop_from_print")
+    // Conflict bảng: delete giữ nguyên nghĩa
+    expect(readChoice(legacy, groups.conflict[0].id, "delete")).toBe("delete")
+  })
+})
+
+describe("classify — FLF-491: ghép theo danh mục và mục con đi theo mục cha", () => {
+  it("nhóm Thừa chỉ còn mục không có chỗ (Thuật ngữ); không mục nào hợp nghĩa ⇒ Không in ra (mục không có dữ liệu)", () => {
+    const oldDoc = [
+      old("custom:CS01", "1 Tổng quan sản phẩm", 1),
+      old("slot:goals", "Mục tiêu", 2),
+      old("custom:CS04", "Hệ thống bên ngoài", 2),
+      old("fixed:4.2.4", "4.2.4 Thuộc tính đặc thù", 3),
+      old("fixed:5.5", "5.5 Thuật ngữ", 2)
+    ]
+    const { groups } = run(oldDoc, [neu(0, "1. Product Overview", "fixed:1", { level: 2 }), neu(1, "4.2.4 …", "unmapped", { level: 3 })])
+    expect(groups.extra.map((e) => e.old_key)).toEqual(["fixed:5.5"])
+    expect(groups.extra[0]).toMatchObject({ follower_keys: [], suggested: "drop_from_print", suggested_reason: "no_place", confidence: "high", data_size: 0 })
   })
 })

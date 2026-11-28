@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express"
 import type { OAuth2Client } from "google-auth-library"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
 import { authMiddleware } from "../../../shared/auth/auth.middleware.js"
+import { requireDocsAgentEnabled } from "../docs-agent/docs-agent.guard.js"
 import { catchAsync } from "../../../shared/utils/catch-async.js"
 import { ApiError } from "../../../shared/utils/api-error.js"
 import { assertGoogleIntegrationEnabled, getAuthClient } from "../google-auth.service.js"
@@ -26,15 +27,16 @@ const router = Router()
  *       - BearerAuth: []
  *     responses:
  *       200:
- *         description: Phản hồi JSON-RPC; lỗi Google nằm trong kết quả tool `isError: true` với mã GOOGLE_*
+ *         description: "Phản hồi JSON-RPC; lỗi Google nằm trong kết quả tool `isError: true` với mã GOOGLE_*"
  *       401:
  *         description: UNAUTHORIZED
  *       503:
- *         description: GOOGLE_INTEGRATION_DISABLED
+ *         description: "GOOGLE_INTEGRATION_DISABLED | GOOGLE_DOCS_AGENT_DISABLED"
  */
 router.post(
   "/",
   authMiddleware,
+  requireDocsAgentEnabled,
   catchAsync(async (req: Request, res: Response) => {
     const userId = req.user?.userId
     if (!userId) throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")

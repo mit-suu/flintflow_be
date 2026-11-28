@@ -6,7 +6,23 @@ import request from "supertest"
 import { expect } from "vitest"
 import app from "../../src/app.js"
 import { getImportResponseSchema } from "../../src/modules/import/import.dto.js"
+import { applyDropText } from "../../src/modules/import/import.service.js"
+import { ImportedDocument } from "../../src/modules/import/imported-document.model.js"
 import type { SeededFixture } from "../setup.js"
+
+/**
+ * FLF-463: màn đọc khung "Bỏ tất cả" rồi viết lại file như lúc bấm Bắt đầu. Khung mẫu (vd Report3) còn bảng / hình mẫu thì mục đó
+ * là "có" (Code không phân biệt chữ của mẫu với chữ thật) — người dùng Bỏ chữ để FlintFlow soạn từ đầu. `keep`: mục (theo tiêu đề)
+ * giữ nội dung.
+ */
+export const dropAllText = async (seeded: SeededFixture, projectId: string, importId: string, keep?: RegExp): Promise<void> => {
+  const auth = { Authorization: `Bearer ${seeded.token}` }
+  const view = await request(app).get(`/api/v1/projects/${projectId}/import`).set(auth)
+  const keys = ((view.body.data.text_sections ?? []) as { key: string; title: string }[]).filter((s) => !keep?.test(s.title)).map((s) => s.key)
+  const res = await request(app).patch(`/api/v1/projects/${projectId}/import/drop-text`).set(auth).send({ import_id: importId, keys })
+  expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+  await applyDropText((await ImportedDocument.findById(importId))!)
+}
 
 export const createMode1Project = async (seeded: SeededFixture, name = "Lumen import"): Promise<string> => {
   const res = await request(app).post("/api/v1/projects").set("Authorization", `Bearer ${seeded.token}`).send({ name, mode: "import" })
@@ -39,6 +55,13 @@ export const mode1Api = (seeded: SeededFixture, projectId: string) => {
       const { waitForExtraction } = await import("../../src/modules/import/extract-jobs.js")
       const { waitForFinalize } = await import("../../src/modules/import/finalize-jobs.js")
       await waitForExtraction(importId)
+      // FLF-462 (bước 1.6): còn gì cần xác nhận (field / đoạn lớp 4 độ tin thấp, mục tên đúng nội dung sai) ⇒ xác nhận
+      // hết theo gợi ý AI rồi tự chạy tiếp, để test khác (không quan tâm bước này) vẫn đi hết một mạch như trước
+      const afterExtract = (await request(app).get(`${base}/import`).set(auth)).body.data
+      if (afterExtract.import.status === "fields_review") {
+        await request(app).patch(`${base}/import/fields`).set(auth).send({ import_id: importId, confirm_all: true })
+        await request(app).post(`${base}/import/resume`).set(auth).send({ import_id: importId })
+      }
       // FLF-343: I-4 xong ⇒ job finalize (baseline 0.1 + kiểm tra) chạy nối tiếp — chờ luôn tới cuối lượt một mạch
       await waitForFinalize(importId)
       const deadline = Date.now() + timeoutMs
@@ -111,6 +134,9 @@ export const fakeSemanticCheck = (prompt: string): string | undefined => {
   return JSON.stringify({ findings: [{ rule: "ambiguity", section_id: "fixed:4.2.3", message: "\"95% of requests\" needs a load profile.", block_ids: [b] }] })
 }
 
+/** FLF-453 (business-flow §3.1.2 "Rà soát phần có sẵn") — mặc định không phát hiện gì; test riêng của vòng rà soát ghi `mockOverrides.next` khác. */
+export const fakeReviewExisting = (prompt: string): string | undefined => (prompt.includes("# Import Review Existing") ? JSON.stringify({ findings: [] }) : undefined)
+
 /**
  * I-4 phần ảnh (phase 5): mặc định ảnh không phải diagram đọc được (`other`). Ảnh có chú thích chứa "USECASE-IMG" ⇒
  * use case diagram: actor "Guest" mới + UC-02 (đã có từ chữ) thêm actor Guest.
@@ -129,7 +155,8 @@ export const fakeDiagram = (prompt: string): string | undefined => {
   })
 }
 
-export const fakeMode1 = (prompt: string): string | undefined => fakeImportExtract(prompt) ?? fakeDiagram(prompt) ?? fakeSemanticCheck(prompt)
+export const fakeMode1 = (prompt: string): string | undefined =>
+  fakeImportExtract(prompt) ?? fakeDiagram(prompt) ?? fakeSemanticCheck(prompt) ?? fakeReviewExisting(prompt)
 
 // ─── change request ─────────────────────────────────────────────
 
@@ -196,4 +223,13 @@ export const fakeCrProposeNoChange = (prompt: string): string | undefined => {
       return { location_id: l.location_id, conclusion: "edit", reason: "noop", spine_ops: [{ op: "set", path: `${l.path}.${field}`, value: value[field] ?? "" }] }
     })
   })
+}
+
+/**
+ * UC-85: sau baseline dự án chưa theo mẫu nào - tác giả (Lead) bấm "Save to library" để cấu trúc dự án thành mẫu khung và dự án
+ * theo bản đó. Test cần "mẫu trước" của dự án (đổi ngược) thì gọi bước này ngay sau baseline.
+ */
+export const saveTemplateProposal = async (token: string, projectId: string): Promise<void> => {
+  const res = await request(app).post(`/api/v1/projects/${projectId}/template-proposal/save`).set("Authorization", `Bearer ${token}`)
+  expect(res.status, JSON.stringify(res.body.error)).toBe(200)
 }

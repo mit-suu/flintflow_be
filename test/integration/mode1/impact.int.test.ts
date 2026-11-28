@@ -49,6 +49,16 @@ describe("C-3 trên Spine", () => {
     for (const l of d.locations.filter((x) => x.found_by.includes("mention"))) expect(l.current_text).toMatch(/UC-01|FR-3\.2\.2|Register account|Log in to system/)
   })
 
+  it("FLF-483: giá trị cụ thể trong chữ CR (\"2 seconds\") ⇒ phần tử ghi giá trị đó là vị trí dù đích và từ khoá không nhắc tới", async () => {
+    const { c, cr, projectId, crId } = await toImpactReview()
+    await ChangeRequest.updateOne(
+      { projectId, cr_id: crId },
+      { $set: { description: "Response time must be 1 second instead of 2 seconds.", targets: { entity_paths: ["use_cases[id=UC-01]"], keywords: ["zzzqqq"] } } }
+    )
+    const d = detail(await c.post(`${cr}/impact`))
+    expect(d.locations.find((l) => l.path === "nfrs[id=NFR-01]")?.found_by).toContain("keyword")
+  })
+
   it("đích không phải phần tử / không còn, từ khoá < 3 ký tự ⇒ 409 CR_NO_LOCATIONS nói rõ đích, không khoá gì, CR giữ impact_review", async () => {
     const { c, cr, projectId, crId } = await toImpactReview()
     await ChangeRequest.updateOne({ projectId, cr_id: crId }, { $set: { targets: { entity_paths: ["flags", "actors[id=A99]"], keywords: ["xy"] } } })
@@ -119,6 +129,8 @@ describe("C-3 tìm lại", () => {
     expect(late.status).toBe(409)
     expect(late.body.error.code).toBe("CR_INVALID_TRANSITION")
 
+    // Mỗi người một CR mở một lúc ⇒ huỷ CR vừa chạy trước khi tạo CR kế
+    detail(await c.post(`${cr}/cancel`, { reason: "Chỉ để thử CR kế tiếp" }))
     const other = await newCr(c)
     detail(await c.post(`/change-requests/${other}/clarify`))
     await Spine.deleteOne({ projectId })

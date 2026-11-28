@@ -19,6 +19,20 @@ export const BRIEF_EXTRACTION_STEP = "S-1.1"
 export const isBriefCoreTopic = (topic: unknown): boolean =>
   typeof topic === "string" && [BRIEF_VISION_TOPIC, BRIEF_GOALS_TOPIC].includes(topic.trim().toLowerCase())
 
+/** Cách model hay gọi một mục tiêu kinh doanh — đều là `goals` (FLF-449 D1: `target` làm mục tiêu 20% → 8% rơi khỏi §1). */
+const GOALS_TOPIC_ALIASES: ReadonlySet<string> = new Set(["goal", "goals", "target", "targets", "objective", "objectives", "muc tieu"])
+
+/** Chuẩn hoá `topic` của ghi chú Brief: đồng nghĩa của mục tiêu ⇒ `goals` (không phân biệt hoa thường, dấu); topic khác giữ nguyên. */
+export const normalizeBriefTopic = (topic: string): string => {
+  const key = topic
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/đ/g, "d")
+  return GOALS_TOPIC_ALIASES.has(key) ? BRIEF_GOALS_TOPIC : topic
+}
+
 const topicOf = (entry: Pick<Addendum, "topic">): string => entry.topic.trim().toLowerCase()
 
 export interface BriefCoreEntries {
@@ -73,11 +87,21 @@ const sameCore = (a: readonly Addendum[], b: readonly Addendum[]): boolean =>
     return x.id === y.id && x.topic === y.topic && x.content === y.content && x.content_en === y.content_en && x.target_section === y.target_section
   })
 
+/** Step của giai đoạn B-2 (rà giả định, phân loại addendum, Approve Brief) — chạy SAU S-1 (FLF-466 P08). */
+const isFinalizeStep = (stepId: string | null | undefined): boolean => (stepId ?? "").startsWith("B-2.")
+const isInFinalizeBeforeApprove = (spine: Pick<Spine, "progress" | "steps">): boolean =>
+  spine.progress.current_phase === "B-2" && spine.steps.find((s) => s.id === "B-2.3")?.status !== "accepted"
+
 /**
  * S-1.1 đã `accepted` mà `addendum[]` đổi trong lô này ⇒ chuyển S-1.1 về `revision_requested` để dựng lại vision/goals.
  * Cùng kiểu `planScreenQueueAppend`: op engine gọi sau cascade, một chốt phủ gate revision, mở lại bước và `/changes`.
+ *
+ * FLF-466 P08: S-1 chạy TRƯỚC B-2 (business-flow §1.1). Lô do chính B-2.x ghi hoặc sửa qua chat khi còn đang ở B-2 trước
+ * lúc Approve Brief (B-2.3 chưa `accepted`) ⇒ KHÔNG mở lại S-1.1 để tránh vòng lặp. Sau khi Approve Brief, sửa Brief từ
+ * chat / change flow vẫn mở lại như cũ.
  */
-export const planBriefReextract = (after: Spine, before: Spine): Op[] => {
+export const planBriefReextract = (after: Spine, before: Spine, byStepId?: string | null): Op[] => {
+  if (isFinalizeStep(byStepId) || isInFinalizeBeforeApprove(after)) return []
   const step = after.steps.find((s) => s.id === BRIEF_EXTRACTION_STEP)
   if (step?.status !== "accepted") return []
   if (sameCore(after.addendum, before.addendum)) return []

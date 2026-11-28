@@ -15,6 +15,7 @@
  * Không gọi model, không Meter: hết credit vẫn ký được.
  */
 
+import { assertLayoutConfirmedForBaseline } from "../../import/layout-preview.service.js"
 import { Baseline } from "../../spine/baseline.model.js"
 import * as flagsService from "../../spine/flags.service.js"
 import * as repository from "../../spine/spine.repository.js"
@@ -177,6 +178,7 @@ export interface SignOffResult {
  * Ném `BaselineBlockedError` (422) khi còn cờ đỏ, `409` khi `spine_version` đổi giữa lúc quét và lúc ghi.
  */
 export const signOff = async (projectId: string, userId: string, options: SignOffOptions): Promise<SignOffResult> => {
+  await assertLayoutConfirmedForBaseline(projectId)
   const { spine, checkedAtVersion } = await recheckAtBaseline(projectId, userId, options.base_version)
 
   const blocking = blockingFlags(spine)

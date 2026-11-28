@@ -11,6 +11,7 @@
  */
 
 import type { Spine } from "../spine/spine.types.js"
+import { LOCALIZATION_CATEGORIES, SECURITY_CATEGORIES, commonCategoryIn } from "../render/labels.js"
 
 export interface ContentSlotDef {
   id: `slot:${string}`
@@ -68,6 +69,13 @@ export const overlapsOf = (id: string): string[] => {
   return CONTENT_SLOTS.filter((s) => s.parents.includes(id)).map((s) => s.id)
 }
 
+/**
+ * `slotId` chỉ là **một phần** dữ liệu của `parentId` (5.2 Yêu cầu chung có Bảo mật và Bản địa hoá; 5.4 có Giả định, Rủi ro, Câu hỏi
+ * mở): mục cũ `parentId` đặt vào heading `slotId` mà in theo id slot thì mất phần còn lại. Slot duy nhất của mục cha (5.1 ↔ Quy tắc
+ * nghiệp vụ) là cả mục, không tính.
+ */
+export const isPartialSlotOf = (slotId: string, parentId: string): boolean => slotId !== parentId && slotParents(slotId).includes(parentId) && overlapsOf(parentId).length > 1
+
 /** Cặp (mục FPT, slot) cùng có heading trong mapping ⇒ nội dung in hai lần. */
 export const slotOverlaps = (sectionIds: Iterable<string>): [string, string][] => {
   const used = new Set(sectionIds)
@@ -112,9 +120,10 @@ export const slotHasData = (spine: Spine, slotId: string): boolean => {
     case "slot:open_questions":
       return spine.other_requirements.some((o) => o.kind === "open_question")
     case "slot:security":
-      return spine.common_requirements.some((c) => ["security", "session", "audit"].includes(c.category))
+      // Bug #3: loại ghi tự do ("Bảo mật") cũng tính — so sau `normalizeCommonCategory`
+      return spine.common_requirements.some((c) => commonCategoryIn(c.category, SECURITY_CATEGORIES))
     case "slot:localization":
-      return spine.common_requirements.some((c) => ["localization", "date_format"].includes(c.category))
+      return spine.common_requirements.some((c) => commonCategoryIn(c.category, LOCALIZATION_CATEGORIES))
     case "slot:analysis_models":
       return spine.diagrams.some((d) => d.kind === "usecase" || d.kind === "screen_flow" || d.kind === "erd")
     case "slot:references":

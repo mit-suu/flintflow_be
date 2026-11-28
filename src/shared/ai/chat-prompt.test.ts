@@ -13,7 +13,9 @@ const VARIABLES = {
   chat_history: "User: Hello\nAI: Hi, what are you building?",
   input_text: "Can you explain what this document is still missing?",
   documentContext: "## Tài liệu tham khảo\n(không có)",
-  spine_index: "- Use cases: 2 - UC01 Log In; UC02 Log Out"
+  spine_index: "- Use cases: 2 - UC01 Log In; UC02 Log Out",
+  edit_in_chat: "yes",
+  decisions: "[]"
 }
 
 /** Như `buildPrompt`: thế biến vào template rồi nối khối ngôn ngữ trả lời vào cuối. */

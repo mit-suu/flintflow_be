@@ -9,6 +9,7 @@ import type { ChangeRecordRow } from "./section-renderer.js"
 import type { TemplateLayout } from "./layout-sections.js"
 import type { Block, InlineRun, RenderedDocument } from "./rendered-document.types.js"
 import {
+  normalizeCommonCategory,
   ASSEMBLE_TEXT,
   GROUP_HEADINGS,
   RECORD_TEXT,
@@ -144,9 +145,11 @@ const ENGLISH_LABELS = new Set<string>([
 ])
 
 describe("labels - bảng nhãn", () => {
-  it("VI_LABELS / VI_SECTION_TITLES của mode 1 giữ nguyên 42 nhãn / 19 mục (thêm key là đổi bản in mode 1)", () => {
+  it("VI_LABELS / VI_SECTION_TITLES của mode 1 giữ nguyên 44 nhãn / 19 mục (thêm key là đổi bản in mode 1)", () => {
     // 42 = 40 + chú thích hình `Class Diagram` và `State Machine Diagram` (chỉ hai kind mới dùng, không đổi bản in đã có)
-    expect(Object.keys(VI_LABELS)).toHaveLength(42)
+    // FLF-468 (lát D): +2 ("Rule", "Context") — cột bảng mode 1 (§5.1 / §5.3) in tiếng Anh giữa tài liệu tiếng Việt
+    // (ChoViet #11); đây là sửa lỗi có chủ đích, không phải thêm nhãn tuỳ ý.
+    expect(Object.keys(VI_LABELS)).toHaveLength(44)
     expect(Object.keys(VI_SECTION_TITLES)).toHaveLength(19)
     expect(labelFor("vi", "Use Case")).toBe("Use Case")
     expect(fptLabelFor("vi", "Use Case")).toBe("Use case")
@@ -167,6 +170,26 @@ describe("labels - bảng nhãn", () => {
     expect(enumLabel("vi", "actor_kind", "human")).toBe(VI_ENUM_LABELS.actor_kind.human)
     expect(enumLabel("vi", "permission_action", "impersonate")).toBe("impersonate")
     expect(enumLabel(undefined, "priority", "must")).toBe("must")
+  })
+
+  it("FLF-479 (12a): enumLabel en tra EN_ENUM_LABELS cho other_kind / common_category, giá trị lạ giữ nguyên, actor_kind/priority/permission_action không đổi", () => {
+    expect(enumLabel("en", "other_kind", "open_question")).toBe("Open question")
+    expect(enumLabel("en", "other_kind", "risk")).toBe("Risk")
+    expect(enumLabel("en", "other_kind", "assumption")).toBe("Assumption")
+    expect(enumLabel("en", "other_kind", "technical_risk")).toBe("Technical risk")
+    expect(enumLabel("en", "common_category", "date_format")).toBe("Date format")
+    expect(enumLabel("en", "common_category", "pagination")).toBe("Pagination")
+    expect(enumLabel("en", "common_category", "error_handling")).toBe("Error handling")
+    // giá trị lạ (không có trong bảng) giữ nguyên
+    expect(enumLabel("en", "other_kind", "something_else")).toBe("something_else")
+    expect(enumLabel("en", "common_category", "unknown_category")).toBe("unknown_category")
+    // không đổi actor_kind / priority / permission_action (đọc được, không thêm bảng en)
+    expect(enumLabel("en", "actor_kind", "human")).toBe("human")
+    expect(enumLabel("en", "priority", "must")).toBe("must")
+    expect(enumLabel("en", "permission_action", "view")).toBe("view")
+    // tiếng Việt như cũ, không bị ảnh hưởng
+    expect(enumLabel("vi", "other_kind", "open_question")).toBe(VI_ENUM_LABELS.other_kind.open_question)
+    expect(enumLabel("vi", "common_category", "date_format")).toBe(VI_ENUM_LABELS.common_category.date_format)
   })
 
   it("WRITER_TEXT hai ngôn ngữ cùng bộ key, cùng số cột §I", () => {
@@ -196,7 +219,8 @@ describe("labels - fixture 19 màn qua đường mode 2 (mẫu FPT)", () => {
     expect(slots.captions.length).toBeGreaterThan(0)
     // §I: câu máy + người ghi "system"
     for (const text of slots.record) {
-      expect(ENGLISH_LABELS.has(text), text).toBe(false)
+      // FLF-484: "Baseline" là từ mượn, giữ nguyên ở cả hai ngôn ngữ (dòng ký baseline ghi `Baseline <số>`)
+      if (text !== "Baseline") expect(ENGLISH_LABELS.has(text), text).toBe(false)
       expect(text).not.toMatch(/^(Create|Update) |more change|signed$|reconciled|Edited after|Assumptions confirmed|Reviewed:/)
     }
     expect(vi.recordOfChanges.map((r) => r.description)).toContain("Customer asked to rename Login; Sửa sau baseline; Hoà giải các mục cần xem lại; và 2 thay đổi khác")
@@ -305,7 +329,8 @@ describe("labels - fixture 19 màn qua đường mode 2 (mẫu FPT)", () => {
     expect(withLanguage).toEqual(await build(spine, { template }))
     // Bằng chứng nhãn mới không lọt vào mode 1: ô actor kind vẫn là giá trị thô
     expect(JSON.stringify(withLanguage)).toContain('"text":"human"')
-    expect(withLanguage.recordOfChanges.some((r) => /^Create /.test(r.description))).toBe(true)
+    // FLF-484: Record of Changes theo ngôn ngữ của file (mẫu `language: vi`) dù nhãn khác vẫn giữ như file
+    expect(withLanguage.recordOfChanges.some((r) => /^Tạo /.test(r.description))).toBe(true)
   })
 })
 
@@ -342,5 +367,20 @@ describe("labels - writerOptionsFor (FLF-265 §3.1)", () => {
     expect(readZipText(await writeDocx(sample, writerOptionsFor("import", "vi")), "word/document.xml")).toBe(before)
     const en = readZipText(await writeDocx(sample, { flagLanguage: "en" }), "word/document.xml")
     expect(readZipText(await writeDocx(sample, writerOptionsFor("import", "en")), "word/document.xml")).toBe(en)
+  })
+})
+
+describe("normalizeCommonCategory (bug #3 FLF-447)", () => {
+  it("nhãn tiếng Việt, khoá, từ đồng nghĩa (bỏ dấu, không phân biệt hoa thường) ⇒ khoá; lạ ⇒ null", () => {
+    expect(["Bảo mật", "BẢO MẬT", "bao mat", "Security", "security", "An toàn thông tin"].map(normalizeCommonCategory)).toEqual(Array(6).fill("security"))
+    expect(normalizeCommonCategory("Phiên làm việc")).toBe("session")
+    expect(normalizeCommonCategory("Audit trail")).toBe("audit")
+    expect(normalizeCommonCategory("Định dạng ngày giờ")).toBe("date_format")
+    expect(normalizeCommonCategory("Đa ngôn ngữ")).toBe("localization")
+    expect(normalizeCommonCategory("date_format")).toBe("date_format")
+    expect(normalizeCommonCategory("Hiệu năng")).toBeNull()
+    expect(normalizeCommonCategory("constructor")).toBeNull()
+    expect(normalizeCommonCategory("")).toBeNull()
+    expect(normalizeCommonCategory(undefined)).toBeNull()
   })
 })

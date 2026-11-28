@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { ActionType, AiActionError } from "./ai-action.types.js"
 import { parseResponse, type OpTransaction, type ChangeInstructionOutput, type ReviewOutput } from "./response-parser.js"
 
@@ -237,5 +237,94 @@ describe("IMPORT_EXTRACT_DIAGRAM - sơ đồ triển khai (FLF-390, QLHS 11/11 b
     }
     const parsed = parseResponse<{ items: { entity: string }[] }>(JSON.stringify(out), ActionType.IMPORT_EXTRACT_DIAGRAM)
     expect(parsed.items.map((i) => i.entity)).toEqual(["deployment_nodes"])
+  })
+})
+
+describe("FLF-449: review nhận quote và target_id (S-9.2, S-8.4)", () => {
+  const review = (flags: unknown[]) => parseResponse<ReviewOutput>(JSON.stringify({ flags }), ActionType.REVIEW).flags
+
+  it("parse được quote và target_id", () => {
+    const [flag] = review([{ level: "yellow", rule_id: "requirement_conflict", section_id: "function:FN12", target_id: "FN12", quote: "up to 24 hours", message: "Conflict." }])
+    expect(flag).toMatchObject({ quote: "up to 24 hours", target_id: "FN12" })
+    expect(review([{ level: "yellow", section_id: "fixed:1", target_id: null, message: "m" }])[0].target_id).toBeNull()
+  })
+
+  it("output cũ không có hai trường vẫn parse (S-9.3)", () => {
+    const [flag] = review([{ level: "yellow", rule_id: "goal_not_covered", section_id: "fixed:1", message: "Goal 2 is not covered." }])
+    expect(flag.quote).toBeUndefined()
+    expect(flag.target_id).toBeUndefined()
+  })
+})
+
+describe("FLF-449: thẻ phương án ELICIT (ưu / nhược / rủi ro, luật khuyến nghị 03 #3)", () => {
+  type Q = { question: string; options: Array<Record<string, unknown>>; recommendation_reason?: string }
+  const elicit = (questions: unknown[]) =>
+    parseResponse<{ questions: Q[] }>(JSON.stringify({ reply: "Ok", questions }), ActionType.ELICIT).questions
+
+  it("giữ pros / cons / risks / recommended / recommendation_reason (trước đây bị cắt)", () => {
+    const [q] = elicit([
+      {
+        question: "Ai duyệt đơn nghỉ?",
+        topic_key: "leave_approval",
+        recommendation_reason: "Bạn nói trưởng khoa đang ký giấy hằng ngày",
+        options: [
+          { label: "Trưởng khoa (Khuyến nghị)", pros: ["Nhanh"], cons: ["Dồn việc cho trưởng khoa"], risks: ["Giả định trưởng khoa luôn có mặt"] },
+          { label: "Phòng nhân sự", pros: ["Thống nhất"] }
+        ]
+      }
+    ])
+    expect(q.recommendation_reason).toBe("Bạn nói trưởng khoa đang ký giấy hằng ngày")
+    expect(q.options).toEqual([
+      { label: "Trưởng khoa (Khuyến nghị)", pros: ["Nhanh"], cons: ["Dồn việc cho trưởng khoa"], risks: ["Giả định trưởng khoa luôn có mặt"], recommended: true },
+      { label: "Phòng nhân sự", pros: ["Thống nhất"] }
+    ])
+  })
+
+  it("khuyến nghị thiếu lý do ⇒ bỏ cờ + đuôi, giữ thẻ, ghi log", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {})
+    const [q] = elicit([{ question: "Uptime?", topic_key: "uptime", options: [{ label: "99.9% (Khuyến nghị)", description: "Chuẩn SaaS" }, "99%"] }])
+    expect(q.options).toEqual([{ label: "99.9%", description: "Chuẩn SaaS" }, { label: "99%" }])
+    expect(q.recommendation_reason).toBeUndefined()
+    expect(info).toHaveBeenCalledWith(expect.stringContaining("recommendation_dropped scope=elicit reason=missing_reason count=1 topics=uptime"))
+    info.mockRestore()
+  })
+
+  it("model chỉ trả recommended: true ⇒ vẫn gắn đuôi cho client / script cũ đọc", () => {
+    const [q] = elicit([
+      { question: "Kênh nhắc lịch nào?", recommendation_reason: "Bạn nói bệnh nhân lớn tuổi ít dùng ứng dụng", options: [{ label: "SMS", recommended: true }, { label: "Zalo" }] }
+    ])
+    expect(q.options[0]).toEqual({ label: "SMS (Khuyến nghị)", recommended: true })
+  })
+
+  it("không khuyến nghị ⇒ các phương án ngang nhau, lý do lạc bị bỏ", () => {
+    const [q] = elicit([{ question: "Bố cục?", recommendation_reason: "r", options: [{ label: "Lưới" }, { label: "Danh sách" }] }])
+    expect(q.options).toEqual([{ label: "Lưới" }, { label: "Danh sách" }])
+    expect(q.recommendation_reason).toBeUndefined()
+  })
+
+  it("CHAT (lát 2 chưa đòi lý do) giữ trường mới, không bỏ khuyến nghị", () => {
+    const out = parseResponse<{ questions: Q[] }>(
+      JSON.stringify({ reply: "Ok", questions: [{ question: "Nền tảng?", options: [{ label: "Web (Khuyến nghị)", cons: ["Cần mạng"] }, "Mobile"] }] }),
+      ActionType.CHAT
+    )
+    expect(out.questions[0].options[0]).toEqual({ label: "Web (Khuyến nghị)", cons: ["Cần mạng"], recommended: true })
+  })
+})
+
+describe("parseResponse - answered_questions (FLF-472)", () => {
+  it("REVISION nhận answered_questions; mục thiếu answer bị bỏ, không làm hỏng lô; id rỗng ⇒ null", () => {
+    const raw = JSON.stringify({
+      ops: [],
+      answered_questions: [{ id: "OR10", answer: "10 năm" }, { id: "OR11" }, { id: "", question: "Còn ai khác dùng?", topic_key: "roles", answer: "Đủ rồi" }]
+    })
+    const out = parseResponse<OpTransaction>(raw, ActionType.REVISION)
+    expect(out.answered_questions).toEqual([
+      { id: "OR10", answer: "10 năm", question: undefined, topic_key: undefined },
+      { id: null, answer: "Đủ rồi", question: "Còn ai khác dùng?", topic_key: "roles" }
+    ])
+  })
+
+  it("không phải mảng ⇒ coi như không có", () => {
+    expect(parseResponse<OpTransaction>('{"ops":[],"answered_questions":"x"}', ActionType.REVISION).answered_questions).toBeUndefined()
   })
 })

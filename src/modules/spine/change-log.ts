@@ -13,6 +13,8 @@
  */
 
 import { Change as ChangeModel } from "./change.model.js"
+import { parsePath } from "./path-resolver.js"
+import type { RetiredIds } from "./id-allocator.js"
 
 const LOG_MAX = 32
 
@@ -84,4 +86,48 @@ export const createChangeLog = <T>(projection: Record<string, 1> | null, map: (d
 /** Test dùng để cô lập giữa các ca (cùng kiểu `clearReadCache`). */
 export const clearChangeLogs = (): void => {
   for (const logs of allLogs) logs.clear()
+}
+
+// ─── FLF-474 (plan fix #7, phần 7c): mã đã từng bị xoá ──────────────
+
+interface RetiredRow {
+  op: string
+  path: string
+}
+
+/**
+ * Đọc tăng dần (cùng cơ chế với `recordChangeLog` ở `render/assemble.service.ts`), chỉ `{op, path}` — nhẹ, không
+ * cần `before`/`value`.
+ */
+const retiredLog = createChangeLog<RetiredRow>({ op: 1, path: 1 }, (d: RetiredRow) => ({ op: d.op, path: d.path }))
+
+/**
+ * Id đã từng bị xoá của dự án, nhóm theo collection (khoá như tham số `collection` của `id-allocator.ts`
+ * `allocateId`: `"use_cases"`, `"validations"`, `"states"`, `"activity_nodes"`, …) — từ các change `op: "remove"`
+ * nhắm đúng một phần tử (`<collection>[id=X]`, kể cả lồng như `functions[id=F1].validations[id=F1-V1]`).
+ *
+ * "Cần chốt" #4 (plan-fix-07): tính trên `changes` CÒN LẠI sau khôi phục bản chụp (`restoreSnapshot` xoá đuôi
+ * `changes` theo `seq`) — không giữ "đã dùng" vĩnh viễn, không migrate gì thêm. Đọc lại `changes` mỗi lần (có cache
+ * tăng dần ở trên) nên tự theo đúng quy ước này, không cần code riêng.
+ */
+export const retiredIds = async (projectId: string): Promise<RetiredIds> => {
+  const rows = await retiredLog.list(projectId)
+  const out = new Map<string, string[]>()
+  for (const row of rows) {
+    if (row.op !== "remove") continue
+    let segments: ReturnType<typeof parsePath>
+    try {
+      segments = parsePath(row.path)
+    } catch {
+      continue
+    }
+    const last = segments[segments.length - 1]
+    if (last.selector?.kind !== "match") continue
+    const id = last.selector.pairs.find(([k]) => k === "id")?.[1]
+    if (!id) continue
+    const list = out.get(last.key)
+    if (list) list.push(id)
+    else out.set(last.key, [id])
+  }
+  return out
 }

@@ -14,10 +14,17 @@ export interface IProjectDocument extends Document {
   extractedText?: string | null
   parseStatus: "pending" | "success" | "failed"
   parseError?: string | null
+  /**
+   * FLF-449 việc 27: điều Code biết chắc đã mất khi trích chữ - `images_skipped` (hình / sơ đồ trong .docx không được đọc),
+   * `pdf_no_text` (PDF không có lớp chữ, đi kèm `parseStatus: "failed"`). Tài liệu tải trước FLF-449 đọc ra `[]`.
+   */
+  parseWarnings?: string[]
   tokenCount?: number | null
   // AI summary fields (Task 2b)
   summary?: string | null
-  summaryStatus: "pending" | "success" | "failed"
+  /** `running`: một lượt đọc đang giữ tài liệu (FLF-458, chống đọc / trừ credit hai lần); quá hạn `summaryClaimedAt` coi như `pending`. */
+  summaryStatus: "pending" | "running" | "success" | "failed"
+  summaryClaimedAt?: Date | null
   /** Số tài liệu trong project (FLF-292) — phần `D<n>` của mã đoạn `D1-P03`; gán một lần, không đổi khi xoá tài liệu khác. */
   docCode?: number | null
   /**
@@ -100,6 +107,11 @@ const projectDocumentSchema = new Schema<IProjectDocument>(
       type: String,
       default: null
     },
+    parseWarnings: {
+      type: [String],
+      enum: ["pdf_no_text", "images_skipped"],
+      default: []
+    },
     tokenCount: {
       type: Number,
       default: null
@@ -111,9 +123,10 @@ const projectDocumentSchema = new Schema<IProjectDocument>(
     },
     summaryStatus: {
       type: String,
-      enum: ["pending", "success", "failed"],
+      enum: ["pending", "running", "success", "failed"],
       default: "pending"
     },
+    summaryClaimedAt: { type: Date, default: null },
     docCode: {
       type: Number,
       default: null,
@@ -137,7 +150,20 @@ const projectDocumentSchema = new Schema<IProjectDocument>(
       default: null
     }
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: {
+      // FLF-443: response API (upload, danh sách) không lộ khoá / URL kho file và toàn bộ chữ đã trích — đọc chữ qua
+      // `GET /documents/:docId/text`, tải file qua `GET /documents/:docId/download`. `fileName` = public id của kho.
+      transform: (_doc, ret: Record<string, unknown>) => {
+        delete ret.url
+        delete ret.cloudinaryPublicId
+        delete ret.fileName
+        delete ret.extractedText
+        return ret
+      }
+    }
+  }
 )
 
 projectDocumentSchema.index({ projectId: 1, createdAt: -1 })

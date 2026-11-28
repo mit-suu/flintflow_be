@@ -15,6 +15,7 @@ import { ImportedDocument } from "../../../src/modules/import/imported-document.
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
 import { waitForExtraction } from "../../../src/modules/import/extract-jobs.js"
 import { docFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
+import { DocxPackage, writeStamp } from "../../../src/modules/docx-ooxml/index.js"
 
 beforeEach(() => {
   resetMockLlm()
@@ -113,6 +114,14 @@ describe("FLF-412 - Bỏ chữ theo vùng ở màn đọc khung", () => {
     expect(res.body.error.code).toBe("IMPORT_INVALID_STATE")
   })
 
+  it("khoá viết lại file treo quá hạn ⇒ chọn lại được; khoá mới ⇒ vẫn chặn", async () => {
+    const { seeded, projectId, importId } = await upload({ has_srs_file: true })
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { drop_applying: true, drop_applying_at: new Date() } })
+    expect((await drop(seeded, projectId, importId, [])).status).toBe(409)
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { drop_applying_at: new Date(Date.now() - 6 * 60_000) } })
+    expect((await drop(seeded, projectId, importId, [])).status).toBe(200)
+  })
+
   it("Bỏ chữ một vùng ⇒ chỉ vùng đó thành còn trống; khoá lạ bị bỏ qua; Giữ tất cả quay lại như cũ", async () => {
     const { seeded, projectId, importId } = await upload({ has_srs_file: true })
     const before = await view(seeded, projectId)
@@ -126,5 +135,78 @@ describe("FLF-412 - Bỏ chữ theo vùng ở màn đọc khung", () => {
     const restored = await view(seeded, projectId)
     expect(restored.structure_preview.summary).toEqual(before.structure_preview.summary)
     expect(restored.credit_estimate.ai_calls).toBe(before.credit_estimate.ai_calls)
+  })
+})
+
+const start = (seeded: SeededFixture, projectId: string, importId: string) =>
+  request(app).post(`/api/v1/projects/${projectId}/import/extract`).set(H(seeded)).send({ import_id: importId, confirm_latest: true })
+const relabel = (seeded: SeededFixture, projectId: string, importId: string, headings: Record<string, unknown>[]) =>
+  request(app).patch(`/api/v1/projects/${projectId}/import/mapping`).set(H(seeded)).send({ import_id: importId, headings })
+
+describe("FLF-460 - Bắt đầu tách lại file không làm mất nhãn đã đổi", () => {
+  it("đổi nhãn + Ngoài phạm vi rồi Bỏ chữ ⇒ sau Bắt đầu heading vẫn giữ section_id, scope_label và xác nhận tay", async () => {
+    const { seeded, projectId, importId } = await upload({ has_srs_file: true })
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    const [a, b] = profile.heading_map.filter((h) => h.section_id !== "unmapped")
+    expect(a && b).toBeTruthy()
+    const res = await relabel(seeded, projectId, importId, [
+      { block_id: a!.block_id, scope: "out_of_scope" },
+      { block_id: b!.block_id, section_id: "unmapped" }
+    ])
+    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+    const sections = (await view(seeded, projectId)).text_sections as TextSection[]
+    expect((await drop(seeded, projectId, importId, [sections[0]!.key])).status).toBe(200)
+
+    expect((await start(seeded, projectId, importId)).status).toBe(200)
+    await waitForExtraction(importId)
+    const after = (await TemplateProfile.findOne({ projectId }).lean())!
+    const na = after.heading_map.find((h) => h.block_id === a!.block_id)!
+    const nb = after.heading_map.find((h) => h.block_id === b!.block_id)!
+    expect(na).toMatchObject({ scope_label: "out_of_scope", confirmed: true, manual: true })
+    expect(nb).toMatchObject({ section_id: "unmapped", confirmed: true, manual: true })
+    expect(nb.auto_confirmed).toBeFalsy()
+  })
+
+  it("file mang dấu của project khác (mặc định Bỏ tất cả) ⇒ mục người dùng chọn Giữ không bị đặt lại thành Bỏ sau Bắt đầu", async () => {
+    const seeded = await seedFixture("minimal", { balance: 5000 })
+    const created = await request(app).post("/api/v1/projects").set(H(seeded)).send({ name: "Warehouse XYZ", has_srs_file: true })
+    const projectId = String(created.body.data._id)
+    const pkg = await DocxPackage.load(await readFile(WRITTEN_SRS))
+    await writeStamp(pkg, { project_id: "66f0000000000000000000ff", version: "0.3", source: "cr_revision" })
+    const uploaded = await request(app).post(`/api/v1/projects/${projectId}/import`).set(H(seeded)).attach("file", await pkg.toBuffer(), "Old.docx")
+    expect(uploaded.status, JSON.stringify(uploaded.body.error)).toBe(201)
+    const importId = String(uploaded.body.data.import.id)
+    const sections = (await view(seeded, projectId)).text_sections as TextSection[]
+    expect(sections.every((x) => x.dropped)).toBe(true)
+    const kept = sections[0]!
+    expect((await drop(seeded, projectId, importId, sections.slice(1).map((x) => x.key))).status).toBe(200)
+
+    expect((await start(seeded, projectId, importId)).status).toBe(200)
+    await waitForExtraction(importId)
+    const after = (await TemplateProfile.findOne({ projectId }).lean())!
+    expect(after.drop_text ?? null).toBeNull()
+    expect(after.dropped_text ?? []).not.toContain(kept.key)
+    const texts = (await DocBlock.find({ projectId }).lean()).filter((x) => x.kind === "paragraph" && x.text.trim().length > 40 && !x.text.includes("["))
+    expect(texts.length).toBeGreaterThan(0)
+  })
+})
+
+describe("FLF-460 - đổi nhãn sau Bắt đầu", () => {
+  it("job còn chạy (drop_applying) ⇒ 409 IMPORT_INVALID_STATE, không xoá gì; chọn lại đúng mục gợi ý xoá auto_confirmed", async () => {
+    const { seeded, projectId, importId } = await upload({ has_srs_file: true })
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    const h = profile.heading_map[0]!
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { drop_applying: true } })
+    const busy = await relabel(seeded, projectId, importId, [{ block_id: h.block_id, scope: "out_of_scope" }])
+    expect(busy.status).toBe(409)
+    expect(busy.body.error.code).toBe("IMPORT_INVALID_STATE")
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { drop_applying: false } })
+
+    await TemplateProfile.updateOne({ projectId, "heading_map.block_id": h.block_id }, { $set: { "heading_map.$.auto_confirmed": true } })
+    const same = await relabel(seeded, projectId, importId, [{ block_id: h.block_id, section_id: h.section_id }])
+    expect(same.status, JSON.stringify(same.body.error)).toBe(200)
+    const after = (await TemplateProfile.findOne({ projectId }).lean())!.heading_map.find((x) => x.block_id === h.block_id)!
+    expect(after.auto_confirmed).toBeFalsy()
+    expect(after.manual).toBe(true)
   })
 })

@@ -27,10 +27,13 @@ import { buildStepContext, parseStepId, sectionsFedBy } from "./context-projecti
 import * as meter from "./meter.service.js"
 import {
   runDraftPhase,
+  runBatchedDraft,
   runRenderReviewPhase,
+  mockupIdsStaleNow,
   trackSeqRange,
   assertRangeOwnedByStep,
   CALLS_LIMIT,
+  wasAcceptedBefore,
   REGENERATE_LIMIT_COUNT,
   STEP_NOT_RUNNABLE,
   defaultStepRunnerDeps,
@@ -48,6 +51,7 @@ import { signOff, SIGN_OFF_STEP } from "./s9/baseline.service.js"
 import { notify } from "../../modules/notification/notification.service.js"
 import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { recordCreditAckAfterAccept } from "./credit-ack.service.js"
 import type { z } from "zod"
 
 type GateActionKind = z.infer<typeof gateActionSchema>
@@ -57,6 +61,25 @@ export const CALL_LIMIT = "CALL_LIMIT"
 
 /** Lời xác nhận sau revision khi không có gì khác để nói — theo ngôn ngữ trả lời của phiên (FLF-260). */
 const REVISION_FALLBACK_MESSAGE: Readonly<Record<ReplyLanguage, string>> = { vi: "Tôi đã cập nhật lại theo ý bạn.", en: "I've updated it as you asked." }
+
+/** FLF-482 (C2): lời sửa nằm ngoài mục bước này ghi được ⇒ lời cổng nói thật và mở Sửa tài liệu (không hứa "sẽ cập nhật"). */
+const OUT_OF_SCOPE_MESSAGE: Readonly<Record<ReplyLanguage, string>> = {
+  vi: "Phần này nằm ở mục khác nên bước này chưa ghi được. Tôi mở phần Sửa tài liệu để bạn xem trước thay đổi rồi mới áp dụng.",
+  en: "That part lives in another section, so this step can't write it. I'm opening Edit document so you can preview the change before applying it."
+}
+const OUT_OF_SCOPE_TAIL: Readonly<Record<ReplyLanguage, string>> = {
+  vi: "Phần còn lại nằm ở mục khác; tôi mở Sửa tài liệu để bạn xem trước thay đổi.",
+  en: "The rest lives in another section; I'm opening Edit document so you can preview the change."
+}
+/** Lưới an toàn: lượt không ghi gì mà lời cổng vẫn hứa "sẽ cập nhật" ⇒ lời hứa suông. */
+const NO_OP_PROMISE_MESSAGE: Readonly<Record<ReplyLanguage, string>> = {
+  vi: "Lượt này chưa ghi gì vào tài liệu. Nếu bạn muốn đổi phần này, hãy dùng Sửa tài liệu để xem trước rồi áp dụng.",
+  en: "Nothing was written to the document this time. To change this, use Edit document to preview and apply it."
+}
+const PROMISE_PATTERN = /(?<!\p{L})(?:sẽ|se)\s+(?:cập nhật|ghi|sửa|chỉnh|điều chỉnh|đổi|thêm|bổ sung|bỏ|xoá|xóa)|(?<!\p{L})(?:i\s+will|i['’]ll|will)\s+(?:now\s+)?(?:update|add|change|record|revise|adjust|remove|edit)/iu
+
+/** Lời cổng hứa sửa một việc (chưa làm). Chỉ dùng khi lượt không ghi op nào và không báo ngoài phạm vi. */
+export const promisesUpdate = (message: string | undefined): boolean => !!message && PROMISE_PATTERN.test(message)
 
 /** 409 với `meta` cho FE (contract §0.3: `{ regenerate_used: 3 }` / `{ calls_used: 8 }`). */
 export class GateLimitError extends ApiError {
@@ -97,6 +120,10 @@ export interface GateResult {
   spine_version: number
   /** Sau `revision`: lời AI xác nhận điều vừa sửa (`notes` của lượt soạn lại). */
   message_vi?: string
+  /** Sau accept: bước vừa duyệt đã từng được chốt trước lượt này (chạy lại bước đã qua). Client không tự chạy tiếp quy trình. */
+  rerun?: boolean
+  /** FLF-482 (C2): sau `revision`, phần lời sửa bước này không ghi được ⇒ FE mở Sửa tài liệu với `instruction`. */
+  route_to_change?: { instruction: string }
 }
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
@@ -278,7 +305,9 @@ const doAccept = async (projectId: string, stepId: string, userId: string, recor
   const afterSpine = stripRecord(applied.spine)
   if (phaseFullyAccepted(afterSpine, def.phase)) notifyPhaseAccepted(userId, def.phase)
 
-  return applied.spine_version
+  // FLF-466 P08: Approve Brief (B-2.3) và chốt danh sách màn (S-4.1) sinh lần báo credit — server chặn tới khi user xác nhận
+  const ackVersion = await recordCreditAckAfterAccept(projectId, stepId, userId)
+  return ackVersion ?? applied.spine_version
 }
 
 // ─── revision / regenerate ──────────────────────────────────────────
@@ -322,6 +351,13 @@ export const phaseGateAssumptions = (spine: Spine, stepId: string): GateAssumpti
     .map((a) => ({ id: a.id, text: a.statement, ...(a.statement_vi ? { text_vi: a.statement_vi } : {}) }))
 }
 
+/**
+ * FLF-470 #6: `regenerate` ("Soạn lại") chia lô như `/run` (`runBatchedDraft`, dùng chung với
+ * `step-runner.service.ts`) khi step chia lô theo function (S-5.2/S-5.4 có loop, S-7.1, S-7.3) — trước
+ * đây gọi `runDraftPhase` một lượt nên dự án lớn vẫn bị cắt token như trước FLF-433. `revision` ("Tôi
+ * muốn sửa") GIỮ một lượt: sửa đúng chỗ được nhắn, đầu ra nhỏ — không cần chia lô (rủi ro cắt token của
+ * revision trên step rất lớn vẫn còn, chưa gặp trong log).
+ */
 const redraft = async (
   projectId: string,
   stepId: string,
@@ -330,14 +366,24 @@ const redraft = async (
   extra: { answers?: string; revisionRequest?: string; gateAssumptionIds?: ReadonlySet<string>; statusAssumptionIds?: ReadonlySet<string>; replyLanguage?: ReplyLanguage },
   deps: StepRunnerDeps,
   range: SeqRange
-): Promise<{ spineVersion: number; notes?: string; summary: ChangeSummary[]; applied: boolean }> => {
+): Promise<{ spineVersion: number; notes?: string; summary: ChangeSummary[]; applied: boolean; outOfScope?: string }> => {
   const spineNow = stripRecord(await load(projectId))
   const ctx = await buildStepContext(projectId, stepId)
   const noop = (): void => {}
-  const draft = await runDraftPhase(projectId, stepId, ctx, spineNow, userId, callKind, noop, deps, extra)
-  const review = await runRenderReviewPhase(projectId, stepId, getStep(stepId).renders, parseStepId(stepId).loop, userId, noop, deps)
+  // FLF-489: mockup đã lạc hậu từ trước lượt soạn lại thì bước không vẽ hộ (giống đường chạy chính)
+  const mockupsStaleAtStart = await mockupIdsStaleNow(projectId, spineNow)
+  let draft: { spineVersion: number; applied: boolean; summary?: ChangeSummary[]; notes?: string; outOfScope?: string }
+  if (callKind === "regenerate") {
+    const batched = await runBatchedDraft(projectId, stepId, ctx, spineNow, null, (batchCtx, batchSpine) =>
+      runDraftPhase(projectId, stepId, batchCtx, batchSpine, userId, callKind, noop, deps, extra)
+    )
+    draft = { spineVersion: batched.spineVersion, applied: batched.wroteOps, summary: batched.summary, ...(batched.notes ? { notes: batched.notes } : {}) }
+  } else {
+    draft = await runDraftPhase(projectId, stepId, ctx, spineNow, userId, callKind, noop, deps, extra)
+  }
+  const review = await runRenderReviewPhase(projectId, stepId, getStep(stepId).renders, parseStepId(stepId).loop, userId, noop, deps, { mockupsStaleAtStart })
   const spineVersion = await trackSeqRange(projectId, review.spineVersion, stepId, userId, range.startSeq, range.existing)
-  return { spineVersion, summary: draft.summary ?? [], applied: draft.applied, ...(draft.notes ? { notes: draft.notes } : {}) }
+  return { spineVersion, summary: draft.summary ?? [], applied: draft.applied, ...(draft.notes ? { notes: draft.notes } : {}), ...(draft.outOfScope ? { outOfScope: draft.outOfScope } : {}) }
 }
 
 // ─── điểm vào công khai ──────────────────────────────────────────────
@@ -375,8 +421,12 @@ export const gate = async (
 
     let finalVersion = record.spine_version
     let revisionMessage: string | undefined
+    let routeToChange: { instruction: string } | undefined
+    let rerun = false
 
     if (input.action === "accept" || input.action === "accept_as_is") {
+      // FLF-489: đọc TRƯỚC khi ghi accept, kẻo chính lượt accept này làm bước "đã từng accepted"
+      rerun = wasAcceptedBefore(await spineRepository.listChanges(projectId), stepId)
       const yellowNote = input.action === "accept_as_is" ? (input.note ?? "") : null
       if (getStep(stepId).template_id === SIGN_OFF_STEP) {
         // BUG-01: ký baseline ngay trong lượt Accept — signOff tự quét lại, kiểm cờ đỏ và đánh dấu S-9.5 accepted.
@@ -481,6 +531,18 @@ export const gate = async (
         revisionMessage =
           composeStepGateMessage({ notes: revised.notes, summary: revised.summary, language: replyLanguage }) ??
           (revised.applied ? byLanguage(replyLanguage ?? "vi", REVISION_FALLBACK_MESSAGE) : undefined)
+        // FLF-482 (C2): phần lời sửa ngoài mục của bước ⇒ không hứa, chuyển sang Sửa tài liệu với đúng câu user gõ
+        const note = (input.note ?? "").trim()
+        if (revised.outOfScope && note) {
+          routeToChange = { instruction: note }
+          revisionMessage = revised.applied
+            ? [revisionMessage, byLanguage(replyLanguage ?? "vi", OUT_OF_SCOPE_TAIL)].filter(Boolean).join("\n\n")
+            : byLanguage(replyLanguage ?? "vi", OUT_OF_SCOPE_MESSAGE)
+        } else if (!revised.applied && promisesUpdate(revisionMessage)) {
+          // Lưới đỡ: không ghi op nào, không báo ngoài phạm vi mà lời vẫn hứa "sẽ cập nhật" ⇒ thay bằng câu trung thực
+          console.warn(`[gate-promise-no-op] ${projectId}/${stepId}: lượt revision không ghi gì nhưng lời cổng hứa cập nhật`)
+          revisionMessage = byLanguage(replyLanguage ?? "vi", NO_OP_PROMISE_MESSAGE)
+        }
         const backToProgress = await applyTransaction(projectId, {
           base_version: finalVersion,
           ops: [{ op: "set", path: `steps[id=${stepId}].status`, value: "in_progress" }],
@@ -500,7 +562,7 @@ export const gate = async (
     const next = nextStepOf(afterSpine)
 
     succeeded = true
-    return { step: summary, next_step: next?.id ?? null, spine_version: finalVersion, ...(revisionMessage ? { message_vi: revisionMessage } : {}) }
+    return { step: summary, next_step: next?.id ?? null, spine_version: finalVersion, ...(revisionMessage ? { message_vi: revisionMessage } : {}), ...(rerun ? { rerun: true } : {}), ...(routeToChange ? { route_to_change: routeToChange } : {}) }
   } finally {
     await finishRun(projectId, stepId, run.run_id, ...(await runEndAfterGate(projectId, stepId, succeeded ? null : previous)))
   }

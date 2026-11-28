@@ -13,22 +13,24 @@ import app from "../../../src/app.js"
 import { authAs, seedFixture, type SeededFixture } from "../../setup.js"
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { mockTranslateItems } from "../../../src/shared/ai/providers/mock.provider.js"
-import { createMode1Project, fakeMode1 } from "../../helpers/mode1.js"
-import { fileOf } from "../../helpers/mode1-import-p4.js"
+import { createMode1Project, fakeMode1, saveTemplateProposal } from "../../helpers/mode1.js"
+import { fileOf, runExtraction } from "../../helpers/mode1-import-p4.js"
 import { p, styled } from "../../../src/modules/docx-ooxml/testing/make-docx.js"
 import { makeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
 import { docFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
+import { DocxPackage, readBlocks } from "../../../src/modules/docx-ooxml/index.js"
 import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.js"
+import { systemChangeActor } from "../../../src/modules/doc-version/doc-version.constants.js"
 import { ChangeRequest } from "../../../src/modules/change-request/change-request.model.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
 import { acceptLatest, uploadImport } from "../../../src/modules/import/import.service.js"
-import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { finalizeImport } from "../../../src/modules/import/finalize.service.js"
 import { Project } from "../../../src/modules/project/project.model.js"
 import { Change } from "../../../src/modules/spine/change.model.js"
 import { applyTransaction } from "../../../src/modules/spine/op-engine.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 import { Membership, type OrgRole } from "../../../src/modules/organization/membership.model.js"
+import { translationUnits } from "../../../src/modules/translation/translation-units.js"
 import { applyMigration } from "../../../src/modules/template-migration/apply.service.js"
 import { recoverApplyingMigration, recoverStuckMigrations } from "../../../src/modules/template-migration/recover-applying.js"
 import { TemplateMigration } from "../../../src/modules/template-migration/template-migration.model.js"
@@ -79,7 +81,7 @@ const toReady = async (token: string, projectId: string, body: object, choose?: 
   expect((await request(app).post(url(projectId, id, "/confirm-mapping")).set(H(token))).status).toBe(200)
   const dto = (await request(app).get(url(projectId, id)).set(H(token))).body.data as MigrationDto
   const items = [...dto.groups.extra, ...dto.groups.conflict]
-  const decisions = dto.undecided.map((d) => {
+  const decisions = [...dto.groups.extra, ...dto.groups.conflict].map((i) => i.id).map((d) => {
     const item = items.find((i) => i.id === d)!
     const safe = item.choices.filter((c) => !item.ai_choices.includes(c) && !c.startsWith("move_to:"))
     return { id: d, choice: choose?.(d, safe) ?? safe.find((c) => c === "keep_custom") ?? safe[0] }
@@ -103,27 +105,30 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
     const legacyIds = spineBefore.custom_sections.filter((c) => /Legacy/.test(c.heading)).map((c) => c.id)
     expect(legacyIds.length).toBe(1)
 
-    // Xoá mục riêng Legacy Gateway theo quyết định
-    const ready = await toReady(lead.token, projectId, { template_id: templateId, version: 1 }, (_id, safe) => (safe.includes("delete") ? "delete" : safe[0]))
+    // FLF-466: không còn "Xoá" — mục riêng Legacy Gateway chọn "Không in ra": dữ liệu vẫn nằm trong Spine
+    const ready = await toReady(lead.token, projectId, { template_id: templateId, version: 1 }, (_id, safe) => (safe.includes("drop_from_print") ? "drop_from_print" : safe[0]))
     const applied = await request(app).post(url(projectId, ready.id, "/apply")).set(H(lead.token))
     expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
     expect(applied.body.data.state).toBe("applied")
 
     const migration = (await TemplateMigration.findById(ready.id).lean())!
     expect(migration).toMatchObject({ open: false, translated: false, apply_steps: { snapshot: true, file: true, spine: true, profile: true } })
-    // CR nguồn template_migration mang Change; Change có txn tiền tố
-    const cr = (await ChangeRequest.findOne({ projectId, "source.kind": "template_migration" }).lean())!
-    expect(cr).toMatchObject({ status: "written", source: { kind: "template_migration", ref: ready.id } })
+    // FLF-466: không còn CR giả; Change mang `by = system_change:<migrationId>` + txn tiền tố; có đúng một version thay đổi hệ thống
+    expect(await ChangeRequest.countDocuments({ projectId, "source.kind": "template_migration" })).toBe(0)
     const own = await Change.find({ projectId, txn: { $regex: `^${TEMPLATE_MIGRATION_TXN_PREFIX}${ready.id}` } }).lean()
-    expect(own.length).toBeGreaterThan(0)
-    expect(own.every((c) => c.by === cr.cr_id)).toBe(true)
+    expect(own.every((c) => c.by === systemChangeActor(ready.id))).toBe(true)
+    const sysVersions = await DocVersion.find({ projectId, kind: "system_change" }).lean()
+    expect(sysVersions).toHaveLength(1)
+    expect(sysVersions[0]).toMatchObject({ version: "0.2", based_on: "0.1", cr_ids: [], system_change: { type: "template_migration", ref: ready.id } })
+    expect(sysVersions[0].spine_snapshot).toBeTruthy()
+    expect(migration.apply_steps).toMatchObject({ version: true })
     // Client không tạo được CR nguồn này
     const forged = await request(app).post(`/api/v1/projects/${projectId}/change-requests`).set(H(lead.token)).send({ title: "x", description: "y", requester: "z", source: { kind: "template_migration", ref: null } })
     expect(forged.status).toBe(400)
 
     spineRepository.clearReadCache()
     const spineAfter = (await spineRepository.get(projectId))!
-    expect(spineAfter.custom_sections.some((c) => c.id === legacyIds[0])).toBe(false)
+    expect(spineAfter.custom_sections.some((c) => c.id === legacyIds[0])).toBe(true)
     const profileAfter = (await TemplateProfile.findOne({ projectId }).lean())!
     expect(profileAfter.source_file_ref).toBe(migration.new_base_file_ref)
     expect(profileAfter.source_file_ref).not.toBe(profileBefore.source_file_ref)
@@ -149,6 +154,12 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
     const reverted = await request(app).post(url(projectId, ready.id, "/revert")).set(H(lead.token))
     expect(reverted.status, JSON.stringify(reverted.body)).toBe(200)
     expect(reverted.body.data.state).toBe("reverted")
+    // FLF-466: hoàn tác đổi mẫu cũng là thay đổi hệ thống, số phụ kế tiếp, đúng một version
+    const afterRevert = await DocVersion.find({ projectId, kind: "system_change" }).sort({ version: 1 }).lean()
+    expect(afterRevert.map((v) => [v.version, v.system_change?.type, v.system_change?.ref])).toEqual([
+      ["0.2", "template_migration", ready.id],
+      ["0.3", "template_revert", `${ready.id}:revert`]
+    ])
     spineRepository.clearReadCache()
     const spineBack = (await spineRepository.get(projectId))!
     expect(spineBack.custom_sections.some((c) => c.id === legacyIds[0])).toBe(true)
@@ -170,6 +181,7 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
   it("B. có thay đổi sau lần đổi mẫu ⇒ hoàn tác bị chặn; đổi ngược về mẫu trước giữ CR, Hoàn tác hết trả lại chữ gốc", async () => {
     const lead = await seedFixture("minimal", { balance: 1000 })
     const projectId = await baselinedProject(lead, await makeSrsDocx())
+    await saveTemplateProposal(lead.token, projectId)
     const before = (await Project.findById(projectId).lean())!.template_ref!
     const templateId = await publishTemplate(lead, lead.orgId, "Mẫu mới", await makeSrsDocx({ extraBody: EXTRA }))
     const ready = await toReady(lead.token, projectId, { template_id: templateId, version: 1 })
@@ -198,7 +210,7 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
     const keepAll = await request(app).patch(url(projectId, rid, "/decisions")).set(H(lead.token)).send({ batch: "keep_all" })
     const fresh = keepAll.body.data as MigrationDto
     const items = [...fresh.groups.extra, ...fresh.groups.conflict]
-    const decisions = fresh.undecided.map((d) => ({ id: d, choice: items.find((i) => i.id === d)!.choices.find((c) => c === "delete" || c === "drop_from_print") ?? items.find((i) => i.id === d)!.choices[0] }))
+    const decisions = items.map((i) => i.id).map((d) => ({ id: d, choice: items.find((i) => i.id === d)!.choices.find((c) => c === "delete") ?? items.find((i) => i.id === d)!.choices.find((c) => c === "drop_from_print") ?? items.find((i) => i.id === d)!.choices[0] }))
     if (decisions.length) await request(app).patch(url(projectId, rid, "/decisions")).set(H(lead.token)).send({ decisions })
     expect((await request(app).post(url(projectId, rid, "/ready")).set(H(lead.token))).status).toBe(200)
     const reversed = await request(app).post(url(projectId, rid, "/apply")).set(H(lead.token))
@@ -215,6 +227,7 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
   it("B2. đổi ngược, mục đã sửa chọn Hoàn tác hết ⇒ sửa của CR bị đảo bằng lô mới, lịch sử CR giữ nguyên", async () => {
     const lead = await seedFixture("minimal", { balance: 1000 })
     const projectId = await baselinedProject(lead, await makeSrsDocx())
+    await saveTemplateProposal(lead.token, projectId)
     const before = (await Project.findById(projectId).lean())!.template_ref!
     const templateId = await publishTemplate(lead, lead.orgId, "Mẫu mới", await makeSrsDocx({ extraBody: EXTRA }))
     const ready = await toReady(lead.token, projectId, { template_id: templateId, version: 1 })
@@ -230,7 +243,7 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
     await request(app).post(url(projectId, rid, "/confirm-mapping")).set(H(lead.token))
     const discard = (await request(app).patch(url(projectId, rid, "/decisions")).set(H(lead.token)).send({ batch: "discard_all" })).body.data as MigrationDto
     const items = [...discard.groups.extra, ...discard.groups.conflict]
-    const decisions = discard.undecided.map((d) => ({ id: d, choice: items.find((i) => i.id === d)!.choices.find((c) => c === "keep_custom") ?? items.find((i) => i.id === d)!.choices[0] }))
+    const decisions = items.map((i) => i.id).map((d) => ({ id: d, choice: items.find((i) => i.id === d)!.choices.find((c) => c === "keep_custom") ?? items.find((i) => i.id === d)!.choices[0] }))
     if (decisions.length) await request(app).patch(url(projectId, rid, "/decisions")).set(H(lead.token)).send({ decisions })
     expect((await request(app).post(url(projectId, rid, "/ready")).set(H(lead.token))).status).toBe(200)
     const applied = await request(app).post(url(projectId, rid, "/apply")).set(H(lead.token))
@@ -257,14 +270,14 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
     }
 
     // Trước bước Spine: lỗi ⇒ về ready, bản nháp + file nền cũ còn nguyên, file mới đã xoá
-    let ready = await toReady(lead.token, projectId, { template_id: templateId, version: 1 }, (_d, s) => (s.includes("delete") ? "delete" : s[0]))
+    let ready = await toReady(lead.token, projectId, { template_id: templateId, version: 1 }, (_d, s) => (s.includes("drop_from_print") ? "drop_from_print" : s[0]))
     for (const at of ["claimed", "translated", "snapshot", "file"] as const) {
       await expect(applyMigration(ctx, ready.id, { afterStep: boom(at) })).rejects.toThrow(/lỗi giả lập/)
       const m = (await TemplateMigration.findById(ready.id).lean())!
       expect(m.state, at).toBe("ready")
       expect(m.open).toBe(true)
       expect(m.new_base_file_ref).toBeNull()
-      expect(m.apply_steps).toEqual({ snapshot: false, file: false, spine: false, profile: false })
+      expect(m.apply_steps).toEqual({ snapshot: false, file: false, spine: false, profile: false, version: false })
       expect(await Change.countDocuments({ projectId, txn: { $regex: `^${TEMPLATE_MIGRATION_TXN_PREFIX}` } }), at).toBe(0)
       expect((await TemplateProfile.findOne({ projectId }).lean())!.source_file_ref).toBe(profileBefore.source_file_ref)
       expect((await Project.findById(projectId).lean())!.template_intent ?? null).not.toBe("fixed")
@@ -291,7 +304,7 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
     const crash = (at: string) => (step: string) => {
       if (step === at) throw new Error("tiến trình chết")
     }
-    const ready = await toReady(lead.token, projectId, { template_id: templateId, version: 1 }, (_d, s) => (s.includes("delete") ? "delete" : s[0]))
+    const ready = await toReady(lead.token, projectId, { template_id: templateId, version: 1 }, (_d, s) => (s.includes("drop_from_print") ? "drop_from_print" : s[0]))
 
     // Chết sau khi lưu file nền (chưa ghi Spine)
     await expect(applyMigration(ctx, ready.id, { afterStep: crash("file"), recoverOnError: false })).rejects.toThrow()
@@ -324,6 +337,31 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
     // Ghi Spine đúng một lần (chạy tiếp không ghi lại)
     const changes = await Change.countDocuments({ projectId, txn: `${TEMPLATE_MIGRATION_TXN_PREFIX}${ready.id}` })
     expect(changes).toBeGreaterThan(0)
+  })
+
+  it("C3. FLF-466: sập sau bước profile hoặc ngay sau bước version ⇒ phục hồi ra ĐÚNG MỘT version thay đổi hệ thống, file in theo mẫu mới, cờ được tính lại", async () => {
+    for (const crashAt of ["profile", "version"] as const) {
+      const lead = await seedFixture("minimal", { balance: 1000 })
+      const projectId = await baselinedProject(lead, await makeSrsDocx({ extraBody: LEGACY }))
+      const templateId = await publishTemplate(lead, lead.orgId, "Mẫu ngân hàng", await makeSrsDocx({ extraBody: EXTRA }))
+      const ctx = ctxOf(lead, projectId)
+      const ready = await toReady(lead.token, projectId, { template_id: templateId, version: 1 }, (_d, s) => (s.includes("drop_from_print") ? "drop_from_print" : s[0]))
+      const crash = (step: string) => {
+        if (step === crashAt) throw new Error("tiến trình chết")
+      }
+      await expect(applyMigration(ctx, ready.id, { afterStep: crash, recoverOnError: false })).rejects.toThrow()
+      expect(await DocVersion.countDocuments({ projectId, kind: "system_change" }), crashAt).toBe(crashAt === "version" ? 1 : 0)
+      expect(await recoverApplyingMigration(ready.id, { force: true })).toBe("applied")
+      // Chạy lại sau khi đã applied không sinh thêm
+      expect(await recoverApplyingMigration(ready.id, { force: true })).toBe("skipped")
+      const versions = await DocVersion.find({ projectId, kind: "system_change" }).lean()
+      expect(versions, crashAt).toHaveLength(1)
+      expect(versions[0]).toMatchObject({ version: "0.2", system_change: { type: "template_migration", ref: ready.id } })
+      expect((await TemplateMigration.findById(ready.id).lean())!.apply_steps).toMatchObject({ profile: true, version: true })
+      // File in theo mẫu mới (đã ghi profile mới trước khi dựng file): heading của mẫu mới có mặt
+      const blocks = await readBlocks(await DocxPackage.load(await docFileStore().load(versions[0].file_ref)))
+      expect(blocks.some((b) => /Operating Environment/.test(b.text)), crashAt).toBe(true)
+    }
   })
 
   it("D. Spine đổi giữa ready và áp dụng ⇒ 409 STALE, quay về bước phân nhóm, chưa ghi gì", async () => {
@@ -372,7 +410,8 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
     expect((await Project.findById(projectId).lean())!.documentLanguage).toBe("vi")
     expect(profileVi.function_originals).toEqual([])
     // Bản đã phát hành giữ nguyên: bản ghi + file + binding không bị đụng
-    const versionsAfter = await DocVersion.find({ projectId }).lean()
+    const versionsAfter = (await DocVersion.find({ projectId }).lean()).filter((v) => v.kind !== "system_change")
+    expect(await DocVersion.countDocuments({ projectId, kind: "system_change", "system_change.ref": ready.id })).toBe(1)
     expect(versionsAfter.map((v) => [v.version, v.file_ref, v.template_source ?? null, v.spine_snapshot ?? null])).toEqual(versionsBefore.map((v) => [v.version, v.file_ref, v.template_source ?? null, v.spine_snapshot ?? null]))
     for (const v of versionsAfter) expect((await docFileStore().load(v.file_ref)).length).toBeGreaterThan(0)
 
@@ -394,7 +433,51 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
     expect((await TemplateProfile.findOne({ projectId }).lean())!.language).toBe("en")
     spineRepository.clearReadCache()
     if (visionBefore) expect((await spineRepository.get(projectId))!.project.vision).toBe(`[en] ${visionBefore}`)
-    expect((await DocVersion.find({ projectId }).lean()).map((v) => v.file_ref)).toEqual(versionsBefore.map((v) => v.file_ref))
+    // Mỗi lần đổi mẫu / hoàn tác thêm một version `system_change` (FLF-466); bản đã phát hành vẫn nguyên file
+    expect((await DocVersion.find({ projectId, kind: { $ne: "system_change" } }).lean()).map((v) => v.file_ref)).toEqual(versionsBefore.map((v) => v.file_ref))
+  })
+
+  it("E2. một lô dịch hỏng một đơn vị (model không trả) ⇒ áp dụng vẫn xong (không 502), translation_summary báo đúng, Spine giữ chữ gốc đúng đơn vị đó", async () => {
+    const lead = await seedFixture("minimal", { balance: 1000 })
+    const projectId = await baselinedProject(lead, await makeSrsDocx())
+    const enTemplate = await publishTemplate(lead, lead.orgId, "Mẫu EN", await makeSrsDocx({ extraBody: EXTRA }))
+    await TemplateProfile.updateOne({ projectId }, { $set: { language: "vi" } })
+
+    const spineBefore = (await spineRepository.get(projectId))!
+    const units = translationUnits(spineBefore).filter((u) => u.ref.group !== "diagrams")
+    expect(units.length).toBeGreaterThan(0)
+    const failingUnit = units[0]
+
+    // Lô dịch: model không bao giờ trả về đúng một đơn vị (mô phỏng lỗi hình dạng câu trả lời của ChoViet #8) — còn lại dịch như thường
+    mockOverrides.next = (prompt) => {
+      if (!prompt.includes("You translate a batch")) return fakeMode1(prompt)
+      const translated = mockTranslateItems(prompt).filter((i) => i.key !== failingUnit.key)
+      return JSON.stringify({ items: translated })
+    }
+
+    const ready = await toReady(lead.token, projectId, { template_id: enTemplate, version: 1 })
+    expect(ready.language).toMatchObject({ source: "vi", target: "en", needs_translation: true })
+    const applied = await request(app).post(url(projectId, ready.id, "/apply")).set(H(lead.token))
+    expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
+    expect(applied.body.data.state).toBe("applied")
+    expect(applied.body.data.translation_summary?.untranslated).toBeGreaterThan(0)
+    expect(applied.body.data.translation_summary?.translated).toBeGreaterThan(0)
+    expect(applied.body.data.translation_summary?.sections.length).toBeGreaterThan(0)
+
+    const migration = (await TemplateMigration.findById(ready.id).lean())!
+    expect(migration.untranslated_keys).toContain(failingUnit.key)
+
+    spineRepository.clearReadCache()
+    const spineAfter = (await spineRepository.get(projectId))!
+    const afterUnits = translationUnits(spineAfter).filter((u) => u.ref.group !== "diagrams")
+    // Đơn vị hỏng giữ nguyên chữ gốc (không bị bỏ trống / mất nội dung)
+    expect(afterUnits.find((u) => u.key === failingUnit.key)?.value).toEqual(failingUnit.value)
+    // Các đơn vị khác dịch được bình thường
+    const otherTranslated = afterUnits.find((u) => u.key !== failingUnit.key && u.ref.group === failingUnit.ref.group)
+    if (otherTranslated) {
+      const text = Array.isArray(otherTranslated.value) ? otherTranslated.value[0] : otherTranslated.value
+      if (text) expect(text).toMatch(/^\[en\]/)
+    }
   })
 
   it("F. Viewer và dự án org khác không áp dụng / hoàn tác được", async () => {
@@ -411,5 +494,27 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
       expect((await request(app).post(url(projectId, ready.id, suffix)).set(H(other.token))).status, suffix).toBe(404)
     }
     expect((await TemplateMigration.findById(ready.id).lean())!.state).toBe("ready")
+  })
+
+  it("G. mẫu có heading con cùng mục dưới Phạm vi (In / Out of Scope) ⇒ gộp vào mục cha: không thành mục thiếu, file + layout không có heading con (lỗi #5 test FLF-447)", async () => {
+    const lead = await seedFixture("minimal", { balance: 1000 })
+    const scope = styled("u1", "6 Release Scope") + p("In scope: course catalog and enrollment.") + p("Out of scope: offline mode.")
+    const projectId = await baselinedProject(lead, await makeSrsDocx({ extraBody: scope }))
+    const templateScope =
+      styled("u1", "6 Release Scope") + p("[Describe the release scope.]") + styled("u2", "In Scope") + p("[List the in-scope features.]") + styled("u2", "Out of Scope") + p("[List what is out of scope.]")
+    const templateId = await publishTemplate(lead, lead.orgId, "Mẫu chia phạm vi", await makeSrsDocx({ extraBody: templateScope }))
+    const ready = await toReady(lead.token, projectId, { template_id: templateId, version: 1 })
+    const pending = (await TemplateMigration.findById(ready.id).lean())!
+    expect(pending.pairing.children?.length, JSON.stringify(pending.pairing)).toBe(2)
+    expect(ready.groups.missing.map((m) => m.heading_text)).not.toContain("In Scope")
+
+    const applied = await request(app).post(url(projectId, ready.id, "/apply")).set(H(lead.token))
+    expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
+    const migration = (await TemplateMigration.findById(ready.id).lean())!
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    expect(profile.layout.filter((l) => l.section_id === "slot:scope").map((l) => l.heading_text)).toEqual(["6 Release Scope"])
+    expect(profile.layout.some((l) => /^(In|Out of) Scope$/.test(l.heading_text))).toBe(false)
+    expect(profile.migration_missing_sections ?? []).not.toContain("slot:scope")
+    expect(migration.warnings.filter((w) => /heading nhưng layout dự kiến|dựng toàn bộ từ Spine/.test(w))).toEqual([])
   })
 })

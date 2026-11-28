@@ -7,12 +7,20 @@
  *   bật lại 0 credit; kiểu `original` mà không ảnh nào đọc được ⇒ chuyển màn đó sang `system`. Model lỗi ⇒ màn giữ ảnh gốc.
  *   Màu chủ đạo ảnh gốc ⇒ theme dự án khi chưa chọn màu, không thì trả `suggested_color`.
  * - `disable`: dùng lại ảnh gốc (giữ hình đã vẽ), 0 credit.
+ * FLF-466 (BF §3.1, §2): sau baseline, "Vẽ lại bằng mockup" và "Dùng ảnh gốc" là **thay đổi hệ thống** — mỗi lượt một DocVersion
+ * `system_change` (`recordMockupChange`); gói đang chờ duyệt / đang đổi mẫu thì không bắt đầu được. Sơ đồ tự vẽ lại (sau CR, chat, import)
+ * không đi qua đây nên không sinh version.
  */
 
 import mongoose from "mongoose"
+import { randomUUID } from "node:crypto"
+import { recordSystemChange } from "../doc-version/system-change.service.js"
+import { assertNoMigrationRunning } from "../template-migration/migration-guard.js"
+import { assertProjectUnlocked } from "../spine/draft-lock.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { getActionCost, getOrCreateWallet, resolveWalletOrg } from "../../shared/ai/credit-reservation.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { screenThemeFor } from "../spine/screen-platforms.js"
 import { resolveScreenTheme, screenMockupsOf, screenThemeOf, type ScreenMockupMode, type ScreenMockupState } from "../../shared/diagram/screen-theme.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
@@ -94,6 +102,24 @@ const defaultDeps = (): MockupDeps => ({
   cost: () => getActionCost(ActionType.RENDER_FIX)
 })
 
+/** Gói đang chờ Lead duyệt / đang đổi mẫu ⇒ bản nháp khoá, không vẽ lại / dùng lại ảnh gốc được (FLF-466, red-team #5). */
+const assertCanRedraw = async (projectId: string): Promise<void> => {
+  await assertNoMigrationRunning(projectId)
+  await assertProjectUnlocked(projectId)
+}
+
+/**
+ * Ghi version `system_change` cho một lượt đổi hình màn (chỉ khi dự án đã có baseline — `recordSystemChange` tự bỏ qua nếu chưa). Hình đã đổi
+ * rồi nên lỗi ghi version chỉ log: lượt sau / lần phát hành vẫn in đúng từ Spine.
+ */
+export const recordMockupChange = async (projectId: string, userId: string, ref: string, summary: string): Promise<void> => {
+  try {
+    await recordSystemChange(projectId, userId, { type: "screen_mockup", ref, summary })
+  } catch (err) {
+    console.warn(`[screen-mockup] đã đổi hình nhưng ghi version thay đổi hệ thống lỗi (project ${projectId}):`, err instanceof Error ? err.message : err)
+  }
+}
+
 const notFound = () => new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
 
 interface Loaded {
@@ -138,7 +164,7 @@ const targetsOf = (spine: Spine, originals: readonly FunctionOriginalLite[], req
 const upToDate = (l: Loaded, screenId: string, mode: ScreenMockupMode, themeContext: Parameters<typeof resolveScreenTheme>[0]): boolean => {
   const section = originalSectionOfScreen(l.spine, l.originals, screenId)
   const images = section ? originalImages(section.blocks) : []
-  const theme = resolveScreenTheme(themeContext, l.spine.project.form_factor)
+  const theme = screenThemeFor(l.spine, screenId, resolveScreenTheme(themeContext, l.spine.project.form_factor))
   const context = layoutContext(l.spine, screenId, theme.platforms, { mode, images: images.map(({ index, caption, context: c }) => ({ index, caption, context: c })) })
   if (!context) return false
   const hash = layoutContentHash(context, mode, imageHashOf(images))
@@ -213,6 +239,7 @@ export interface PreparedRun {
  */
 export const prepare = async (projectId: string, orgId: string, userId: string, req: MockupRequest, deps: MockupDeps = defaultDeps()): Promise<PreparedRun> => {
   const l = await load(projectId, orgId, deps)
+  await assertCanRedraw(projectId)
   const targets = targetsOf(l.spine, l.originals, req)
   const theme = await themeOfProject(projectId)
   const plan = planOf(l, targets, req.mode, theme)
@@ -334,11 +361,13 @@ export const run = async (projectId: string, orgId: string, userId: string, req:
   return result
 }
 
-export const disable = async (projectId: string, orgId: string, req: Pick<MockupRequest, "scope" | "screen_id">, deps: Pick<MockupDeps, "originals"> = defaultDeps()): Promise<{ disabled: string[] }> => {
+export const disable = async (projectId: string, orgId: string, req: Pick<MockupRequest, "scope" | "screen_id">, deps: Pick<MockupDeps, "originals"> = defaultDeps(), actorUserId?: string): Promise<{ disabled: string[] }> => {
   const l = await load(projectId, orgId, { ...defaultDeps(), ...deps })
+  await assertCanRedraw(projectId)
   const targets = new Set(targetsOf(l.spine, l.originals, req))
   const disabled = l.states.filter((s) => targets.has(s.screen_id) && s.enabled).map((s) => s.screen_id)
   await writeStates(projectId, l.states.map((s) => (targets.has(s.screen_id) ? { ...s, enabled: false } : s)))
+  if (disabled.length > 0 && actorUserId) await recordMockupChange(projectId, actorUserId, `screen-mockup:disable:${randomUUID()}`, `Dùng ảnh gốc cho ${disabled.length} màn hình`)
   return { disabled }
 }
 

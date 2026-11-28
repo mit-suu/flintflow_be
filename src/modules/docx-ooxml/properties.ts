@@ -19,6 +19,8 @@ export interface Stamp {
   base_version?: string | null
   latest_cr?: string | null
   kind?: StampKind | null
+  /** FLF-466: mã dự án ngắn; file cũ không có ⇒ không có trường. */
+  project_code?: string
 }
 
 const toKind = (value: string | undefined): StampKind | null => (STAMP_KINDS as readonly string[]).includes(value ?? "") ? (value as StampKind) : null
@@ -45,7 +47,8 @@ export const readStamp = async (pkg: DocxPackage): Promise<Stamp | null> => {
     source: props[STAMP_PROPERTY.source] ?? null,
     base_version: props[STAMP_PROPERTY.base_version] || null,
     latest_cr: props[STAMP_PROPERTY.latest_cr] || null,
-    kind: toKind(props[STAMP_PROPERTY.kind])
+    kind: toKind(props[STAMP_PROPERTY.kind]),
+    ...(props[STAMP_PROPERTY.project_code] ? { project_code: props[STAMP_PROPERTY.project_code] } : {})
   }
 }
 
@@ -68,7 +71,9 @@ export const writeStamp = async (pkg: DocxPackage, stamp: Stamp): Promise<void> 
     [STAMP_PROPERTY.source, stamp.source],
     [STAMP_PROPERTY.base_version, stamp.base_version ?? null],
     [STAMP_PROPERTY.latest_cr, stamp.latest_cr ?? null],
-    [STAMP_PROPERTY.kind, stamp.kind ?? null]
+    [STAMP_PROPERTY.kind, stamp.kind ?? null],
+    // Chỉ thêm: không truyền ⇒ giữ property cũ (file cũ upload lại vẫn chạy)
+    ...(stamp.project_code ? ([[STAMP_PROPERTY.project_code, stamp.project_code]] as [string, string][]) : [])
   ]
   for (const [name, value] of values) {
     let p = props.find((x) => x.getAttribute("name") === name)

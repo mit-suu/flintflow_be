@@ -3,7 +3,7 @@
  * khi đang chạy = không làm gì, job lỗi giữa `baselining` ⇒ hoàn về mốc + `paused: resume_later`, resume chạy lại sạch;
  * job mất (máy chủ khởi động lại) ⇒ `GET /import` đặt `resume_later`.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vitest"
 
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
 
@@ -13,7 +13,7 @@ import { seedFixture } from "../../setup.js"
 import { makeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
 import { finalizeResponseSchema, getImportResponseSchema } from "../../../src/modules/import/import.dto.js"
 import { finalizeCheckpoint } from "../../../src/modules/import/finalize.service.js"
-import { runExtraction } from "../../../src/modules/import/extract.service.js"
+import { runExtraction } from "../../helpers/mode1-import-p4.js"
 import { isFinalizeRunning, waitForFinalize } from "../../../src/modules/import/finalize-jobs.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
@@ -24,6 +24,12 @@ import { Baseline } from "../../../src/modules/spine/baseline.model.js"
 import { CreditWallet } from "../../../src/modules/credits/credit-wallet.model.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 import { env } from "../../../src/config/env.js"
+import { PLANTUML_PROBE } from "../../../src/modules/diagram/diagram.service.js"
+
+// FLF-493 K1: dò PlantUML 3 lần cách 1 giây; test đặt FINALIZE_IDLE_TIMEOUT_MS 1,5 giây nên bỏ khoảng nghỉ (thật mặc định 15 phút).
+const probeGap = PLANTUML_PROBE.gapMs
+beforeAll(() => { PLANTUML_PROBE.gapMs = 0 })
+afterAll(() => { PLANTUML_PROBE.gapMs = probeGap })
 
 beforeEach(() => {
   resetMockLlm()

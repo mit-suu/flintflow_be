@@ -1,14 +1,18 @@
 /**
  * Máy trạng thái import (mode 1, Flow 1 nút 1.1–1.13) — hàm thuần, không đụng DB. FLF-171, plan §5.2.
  *
- * FLF-343 — chế độ 1 chạy một mạch: một điểm dừng duy nhất là `extracting` chưa chạy (màn báo credit + câu hỏi "bản mới
- * nhất"), rồi I-4 ⇒ baseline 0.1 ⇒ kiểm tra ⇒ `gap_review` (FE vào thẳng trang tạo CR) không chờ người dùng:
+ * FLF-343 — chế độ 1 chạy một mạch, chỉ dừng khi cần: điểm dừng #1 là `extracting` chưa chạy (màn báo credit + câu hỏi
+ * "bản mới nhất"), rồi I-4; điểm dừng #2 (FLF-462, bước 1.6) là `fields_review` - chỉ khi còn phần tử / đoạn lớp 4 độ tin
+ * thấp, hoặc mục tên đúng nội dung sai chưa xác nhận (UC-22 `PATCH /import/fields`); không có gì cần xác nhận thì bỏ qua,
+ * đi thẳng baseline 0.1 ⇒ kiểm tra ⇒ `gap_review` (FE vào thẳng trang tạo CR) không chờ người dùng:
  * uploaded ─┬─ preflight_rejected                        (1.2 bị từ chối — user upload file khác = bản ghi mới)
  *           └─ parsing ─► extracting                    (tách file + khớp mẫu; mục độ tin thấp tự nhận + cờ "Cần xem")
- * extracting ─► baselining                              (job I-4 xong ⇒ job finalize nối tiếp, base_version do server tính)
+ * extracting ─┬─ fields_review ─► baselining            (có gì cần xác nhận ở bước 1.6, FLF-462)
+ *             └─ baselining                              (job I-4 xong, không có gì cần xác nhận ⇒ job finalize nối tiếp,
+ *                                                         base_version do server tính)
  * baselining ─► checking ─► gap_review                  (1.10 → 1.11/1.12)
  * Bản ghi cũ (trước FLF-343) còn đi được nhánh: uploaded ─► awaiting_latest_confirm ─► parsing ─► mapping_review ─►
- * extracting ─► fields_review ─► baselining — `POST /import/extract` / `/import/resume` đưa chúng về luồng một mạch.
+ * extracting ─► fields_review ─► baselining — `POST /import/extract` đưa chúng về luồng một mạch.
  * gap_review ─► delivered | change_requested
  * delivered ─► change_requested                         (giao gap report xong, sau đó mới quyết định sửa)
  * incomplete ─► drafting                                (FLF-278 trên FLF-336: chế độ 3 sang Luồng 2 — dự án chạy pipeline
@@ -32,6 +36,11 @@ export const IMPORT_STATUSES = [
   "baselining",
   /** FLF-336 I-5: file thiếu mục của cấu trúc đích ⇒ không có v0 dở dang, dừng ở "Kết quả đọc file" (Dừng / Hoàn thiện). */
   "incomplete",
+  /**
+   * FLF-453 (business-flow §3.1.2 "Rà soát phần có sẵn"): chế độ 3/4 còn mục cần AI rà (đầu vào của phần thiếu, hoặc cờ
+   * đỏ) ⇒ dừng ở đây chờ xác nhận credit trước Luồng 2. Không mục nào cần rà ⇒ bỏ qua, giữ `incomplete` ─► `drafting` cũ.
+   */
+  "reviewing",
   /** FLF-278: chế độ 3 (mẫu bắt buộc) đi tiếp Luồng 2 — soạn phần thiếu bằng pipeline, không tạo v0 từ mẫu. */
   "drafting",
   "checking",
@@ -53,6 +62,7 @@ export const IMPORT_STATUS_LABELS: Readonly<Record<ImportStatus, string>> = {
   fields_review: "Duyệt dữ liệu trích",
   baselining: "Đang chốt bản gốc",
   incomplete: "Chưa hoàn thiện - chờ bạn quyết",
+  reviewing: "Rà soát phần có sẵn",
   drafting: "Đang soạn phần còn thiếu",
   checking: "Đang kiểm tra",
   gap_review: "Xem báo cáo thiếu sót",
@@ -60,8 +70,11 @@ export const IMPORT_STATUS_LABELS: Readonly<Record<ImportStatus, string>> = {
   change_requested: "Đang sửa qua change request"
 }
 
-/** `user`: người dùng bấm Dừng lúc đang đọc nội dung (I-4) — vòng đọc dừng sau lượt AI đang chạy, không gọi thêm. */
-export const IMPORT_PAUSE_REASONS = ["credits", "resume_later", "user"] as const
+/**
+ * `user`: người dùng bấm Dừng lúc đang đọc nội dung (I-4) hoặc kiểm tra AI (1.9) — vòng dừng sau lượt AI đang chạy, không gọi thêm.
+ * `credit_notice` (FLF-454): `checking` dừng để báo lại credit 1.9 thực tế lớn hơn số đã báo; Tiếp tục = xác nhận số đó.
+ */
+export const IMPORT_PAUSE_REASONS = ["credits", "resume_later", "user", "credit_notice"] as const
 export type ImportPauseReason = (typeof IMPORT_PAUSE_REASONS)[number]
 
 export const IMPORT_TRANSITIONS: Readonly<Record<ImportStatus, readonly ImportStatus[]>> = {
@@ -72,9 +85,12 @@ export const IMPORT_TRANSITIONS: Readonly<Record<ImportStatus, readonly ImportSt
   parsing: ["mapping_review", "extracting", "preflight_rejected"],
   mapping_review: ["extracting"],
   extracting: ["fields_review", "baselining"],
-  fields_review: ["baselining"],
+  // FLF-460: đổi nhãn sau import (trước bản gốc) ⇒ I-4 đọc lại mục đó, về màn báo credit
+  fields_review: ["baselining", "extracting"],
   baselining: ["checking", "incomplete"],
-  incomplete: ["baselining", "drafting"],
+  // FLF-460: chế độ 3/4 chưa có bản gốc vẫn đổi nhãn được ⇒ về `extracting` đọc lại mục đổi nhãn
+  incomplete: ["baselining", "drafting", "reviewing", "extracting"],
+  reviewing: ["drafting", "extracting"],
   drafting: ["delivered"],
   checking: ["gap_review"],
   gap_review: ["delivered", "change_requested"],
@@ -86,7 +102,7 @@ export const IMPORT_TRANSITIONS: Readonly<Record<ImportStatus, readonly ImportSt
  * Hai bước có gọi AI (I-4 trích field, 1.11 AI semantic check) — hết credit/lỗi AI thì pause. `baselining`: job finalize
  * chạy nền lỗi hoặc mất (máy chủ khởi động lại) ⇒ hoàn về mốc + `resume_later`, resume chạy lại finalize (`finalize-jobs.ts`).
  */
-export const PAUSABLE_IMPORT_STATUSES: readonly ImportStatus[] = ["extracting", "baselining", "checking"]
+export const PAUSABLE_IMPORT_STATUSES: readonly ImportStatus[] = ["extracting", "baselining", "checking", "reviewing"]
 
 /** Đã có baseline v0 (từ `checking` trở đi) — BR-03: mọi sửa sau đây phải qua CR. */
 export const IMPORT_STATUSES_WITH_BASELINE: readonly ImportStatus[] = ["checking", "gap_review", "delivered", "change_requested"]

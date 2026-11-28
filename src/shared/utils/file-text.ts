@@ -1,17 +1,8 @@
-import { createRequire } from "module"
+import { DocxPackage, readBlocks } from "../../modules/docx-ooxml/index.js"
+import { readPdf } from "./pdf-text.js"
+import { estimateTokenCount, type FileTextWarning, type ParsedFileContent } from "./parsed-file-content.js"
 
-// pdf-parse và mammoth không có bundled TypeScript types nên dùng createRequire
-// để import CommonJS module từ ESM context một cách an toàn.
-const require = createRequire(import.meta.url)
-
-/**
- * Ước lượng số token từ độ dài chuỗi.
- * Dùng tỷ lệ ~4 ký tự/token theo OpenAI estimation.
- * Không cần thư viện tokenizer chính xác ở giai đoạn này.
- */
-export const estimateTokenCount = (text: string): number => {
-  return Math.ceil(text.length / 4)
-}
+export { estimateTokenCount, isPdfWithoutText, PDF_MIN_CHARS_PER_PAGE, type FileTextWarning, type ParsedFileContent } from "./parsed-file-content.js"
 
 /** File đọc được ra chữ: PDF, DOCX/DOC, TXT/MD. */
 export const isTextFile = (mimeType: string, extension: string): boolean => {
@@ -22,37 +13,55 @@ export const isTextFile = (mimeType: string, extension: string): boolean => {
   )
 }
 
+/** Gói zip (OOXML) bắt đầu bằng `PK\x03\x04`; .doc Word 97-2003 là file nhị phân OLE, không đọc theo đường OOXML được. */
+const isZip = (buffer: Buffer): boolean => buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4b && buffer[2] === 0x03 && buffer[3] === 0x04
+
+/** Chữ của một block (bảng ⇒ nối các ô có chữ của từng hàng; ảnh không có chữ). */
+const blockText = (b: { kind: string; text: string; rows: string[][] | null }): string =>
+  b.kind === "table" ? (b.rows ?? []).map((r) => r.map((c) => c.trim()).filter(Boolean).join(" | ")).filter(Boolean).join("\n") : b.text
+
+/**
+ * FLF-458: dùng chung bộ đọc .docx với I-4 (`docx-ooxml`) thay cho mammoth riêng — vẫn một bộ đọc cho cả SRS và
+ * tài liệu tham khảo. Ảnh trong thân tài liệu không có chữ (`image_ref` khác `null`) ⇒ cảnh báo `images_skipped`.
+ */
+const readDocx = async (buffer: Buffer, ext: string): Promise<ParsedFileContent> => {
+  if (!isZip(buffer)) {
+    throw new Error(
+      ext === ".doc"
+        ? "File .doc (Word 97-2003) chưa đọc được. Mở bằng Word, lưu lại thành .docx rồi tải lên."
+        : "File không phải .docx hợp lệ (có thể hỏng hoặc đổi đuôi). Mở bằng Word, lưu lại thành .docx rồi tải lên."
+    )
+  }
+  const pkg = await DocxPackage.load(buffer)
+  const blocks = await readBlocks(pkg)
+  const text = blocks
+    .map((b) => blockText({ kind: b.kind, text: b.text, rows: b.rows ?? null }))
+    .filter((t) => t.trim())
+    .join("\n\n")
+    .trim()
+  const warnings: FileTextWarning[] = blocks.some((b) => b.image_ref) ? ["images_skipped"] : []
+  return { text, tokenCount: estimateTokenCount(text), warnings }
+}
+
 /**
  * Parse nội dung text từ file đã upload (Buffer từ Multer memoryStorage).
- * Trả về { text, tokenCount } hoặc throw Error nếu parse thất bại.
+ * Trả về { text, tokenCount, warnings } hoặc throw Error nếu parse thất bại.
  * Dùng chung: tài liệu project (mode 2/3) và tài liệu bổ sung của change request (mode 1).
  */
-export const parseFileContent = async (
-  buffer: Buffer,
-  mimeType: string,
-  extension: string
-): Promise<{ text: string; tokenCount: number }> => {
+export const parseFileContent = async (buffer: Buffer, mimeType: string, extension: string): Promise<ParsedFileContent> => {
   const ext = extension.toLowerCase()
 
   // PDF
-  if (mimeType === "application/pdf" || ext === ".pdf") {
-    const pdfParse = require("pdf-parse")
-    const data = await pdfParse(buffer)
-    const text = (data.text as string).trim()
-    return { text, tokenCount: estimateTokenCount(text) }
-  }
+  if (mimeType === "application/pdf" || ext === ".pdf") return readPdf(buffer)
 
-  // DOCX / DOC (mammoth chỉ hỗ trợ .docx tốt; .doc là legacy binary)
+  // DOCX / DOC (bộ đọc OOXML chỉ đọc .docx; .doc nhị phân cũ báo lý do rõ)
   if (
     mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
     mimeType === "application/msword" ||
     ext === ".docx" ||
     ext === ".doc"
   ) {
-    const mammoth = require("mammoth")
-    const result = await mammoth.extractRawText({ buffer })
-    const text = (result.value as string).trim()
-    return { text, tokenCount: estimateTokenCount(text) }
+    return readDocx(buffer, ext)
   }
 
   // TXT / MD — đọc trực tiếp từ buffer
@@ -63,7 +72,7 @@ export const parseFileContent = async (
     ext === ".md"
   ) {
     const text = buffer.toString("utf-8").trim()
-    return { text, tokenCount: estimateTokenCount(text) }
+    return { text, tokenCount: estimateTokenCount(text), warnings: [] }
   }
 
   throw new Error(`Unsupported file type for parsing: mimeType=${mimeType}, ext=${extension}`)

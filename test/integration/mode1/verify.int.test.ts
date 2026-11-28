@@ -48,6 +48,23 @@ describe("C-5 kiểm code (đỏ)", () => {
     expect(promptsOf("# CR Consistency")).toHaveLength(0)
   })
 
+  it("FLF-474 (7a): chỗ còn xung đột (người khác đã sửa) ⇒ kiểm không đụng, dừng manual_fix, không AI soạn lại; chỗ khác không bị đè", async () => {
+    const { c, projectId, cr, crId } = await toProposed()
+    await Spine.updateOne({ projectId, "nfrs.id": "NFR-01" }, { $set: { "nfrs.$.threshold": "3 s" }, $inc: { spine_version: 1 } })
+    const conflict = { at_proposal_text: "a", current_text: "b", proposal_text: "c", changed_by: "BA2", changed_at: null, proposed_at: null }
+    await ChangeLocation.updateOne({ projectId, cr_id: crId, path: NFR }, { $set: { conflict } })
+    const before = detail(await c.get(cr)).locations.find((l) => l.path === NFR)!
+    const proposeCalls = promptsOf("# CR Propose").length
+    const d = detail(await c.post(`${cr}/verify`))
+    expect(d.change_request.status).toBe("manual_fix")
+    const nfr = d.locations.find((l) => l.path === NFR)!
+    expect(nfr.conflict).not.toBeNull()
+    expect(nfr.verify!.violations).toEqual([])
+    expect(nfr.redo_count).toBe(before.redo_count)
+    expect(nfr.proposal).toEqual(before.proposal)
+    expect(promptsOf("# CR Propose")).toHaveLength(proposeCalls)
+  })
+
   it("op Spine làm hỏng Spine ⇒ vị trí đó đỏ, vị trí khác đạt; AI làm lại (proposing, redo_count 1)", async () => {
     routeCr((p) => clarifyPerf(p) ?? proposeBadOp(p))
     const { c, cr } = await toProposed()
@@ -283,18 +300,18 @@ describe("FLF-367 C-5 thấy mâu thuẫn ⇒ hỏi người yêu cầu", () => 
     const asked = detail(await c.post(`${cr}/verify`))
     expect(asked.change_request.status).toBe("awaiting_answers")
     expect(asked.pending_questions).toEqual([CONFLICT])
-    expect(asked.change_request.clarifications.at(-1)!.suggestions).toEqual([[...CONTRADICTION_CHOICES]])
+    expect(asked.change_request.clarifications.at(-1)!.suggestions).toEqual([[...CONTRADICTION_CHOICES.vi]])
     // vị trí bỏ kết luận để C-4 đề xuất lại theo câu trả lời; vị trí giữ như luồng gộp lệnh
     expect(asked.locations.every((l) => l.conclusion === null && l.proposal === null && l.verify === null)).toBe(true)
     expect(((await ChangeLocation.find({ projectId, cr_id: crId }).distinct("path")) as string[]).sort()).toEqual([...pathsBefore].sort())
 
     // trả lời "đổi theo CR" ⇒ C-2 chạy lại với câu trả lời ⇒ C-3 / C-4 / C-5
-    const answered = detail(await c.post(`${cr}/answers`, { answers: [CONTRADICTION_CHOICES[0]] }))
+    const answered = detail(await c.post(`${cr}/answers`, { answers: [CONTRADICTION_CHOICES.vi[0]] }))
     expect(answered.change_request.status).toBe("impact_review")
-    expect(promptsOf("# CR Clarify").at(-1)).toContain(`Q1.1: ${CONFLICT}\nA: ${CONTRADICTION_CHOICES[0]}`)
+    expect(promptsOf("# CR Clarify").at(-1)).toContain(`Q1.1: ${CONFLICT}\nA: ${CONTRADICTION_CHOICES.vi[0]}`)
     detail(await c.post(`${cr}/impact`))
     detail(await c.post(`${cr}/propose`))
-    expect(promptsOf("# CR Propose").at(-1)).toContain(CONTRADICTION_CHOICES[0])
+    expect(promptsOf("# CR Propose").at(-1)).toContain(CONTRADICTION_CHOICES.vi[0])
     // model nêu lại đúng mâu thuẫn đã hỏi ⇒ không hỏi lần nữa, chỉ ghi chú vàng
     const done = detail(await c.post(`${cr}/verify`))
     expect(done.change_request.status).toBe("ready_to_submit")

@@ -43,6 +43,10 @@ beforeEach(() => {
 
 const EXCLUDED = [...MODE1_RULE_PROFILE.exclude]
 
+/** Credit đã trừ cho lượt AI đổi tên riêng của đề xuất mẫu sau baseline (UC-85) - ngoài phạm vi kiểm của file này. */
+const proposalCost = async (projectId: string): Promise<number> =>
+  (await Usage.find({ projectId, step_id: /^TEMPLATE_PROPOSAL:/, state: "deducted" }).lean()).reduce((n, u) => n + (u.cost ?? 0), 0)
+
 describe("check - hồ sơ luật mode 1", () => {
   it("luật loại trừ không bắn cờ dù Spine import có điều kiện kích hoạt; luật hạ mức chỉ ra vàng", async () => {
     const { projectId } = await importFinalized()
@@ -55,11 +59,13 @@ describe("check - hồ sơ luật mode 1", () => {
 
     const open = spine.flags.filter((f) => f.resolved_at === null)
     expect(open.filter((f) => EXCLUDED.includes(f.rule_id))).toEqual([])
-    const downgraded = open.filter((f) => MODE1_RULE_PROFILE.downgrade.has(f.rule_id))
-    expect(downgraded.length).toBeGreaterThan(0)
-    expect(downgraded.every((f) => f.level === "yellow")).toBe(true)
-    // SRS mẫu không có tham chiếu chết; đầu mục FPT file không có không còn bắt buộc ⇒ không cờ đỏ nào
-    expect(open.filter((f) => f.level === "red")).toEqual([])
+    // Theo flow 18/11: NFR thiếu số đo là đỏ cả ở chế độ 1 (không còn hạ vàng); danh sách NFR rỗng là chỗ thiếu ⇒ vàng
+    expect([...MODE1_RULE_PROFILE.downgrade]).toEqual(["usecase_relation_invalid"])
+    const nfr = open.filter((f) => f.rule_id === "nfr_missing_number")
+    expect(nfr.length).toBeGreaterThan(0)
+    expect(nfr.every((f) => f.level === (f.target_id ? "red" : "yellow"))).toBe(true)
+    // SRS mẫu không có tham chiếu chết; đầu mục FPT file không có không còn bắt buộc ⇒ cờ đỏ duy nhất là NFR thiếu số đo
+    expect(open.filter((f) => f.level === "red").every((f) => f.rule_id === "nfr_missing_number")).toBe(true)
   })
 })
 
@@ -81,8 +87,9 @@ describe("check - AI semantic (1.11)", () => {
       [semanticBatchStep(1), "deducted", "import_semantic_check"],
       [CROSS_CHECK_STEP, "deducted", "import_cross_check"]
     ])
-    // 6 lượt I-4 + 1 lô check + 1 lượt kiểm chéo (mẫu ngắn ⇒ mỗi lượt quyết toán 1 credit theo token)
-    expect(await CreditWallet.findOne({ userId }).lean()).toMatchObject({ balance: 992, reserved: 0 })
+    // 7 lượt I-4 (FLF-444: có mục riêng "5.9 Team Notes") + 1 lô check + 1 lượt kiểm chéo (mẫu ngắn ⇒ mỗi lượt quyết toán 1 credit theo token), cộng lượt AI đổi tên
+    // của đề xuất mẫu sau baseline 0.1 (UC-85)
+    expect(await CreditWallet.findOne({ userId }).lean()).toMatchObject({ balance: 991 - (await proposalCost(projectId)), reserved: 0 })
   })
 
   it("cờ AI không bị recompute tất định đóng ở lượt sau", async () => {
@@ -119,7 +126,8 @@ describe("check - AI semantic (1.11)", () => {
     const v = (await spineRepository.get(projectId))!.spine_version
     const fin = await finalizeImport(projectId, userId, { import_id: importId, base_version: v })
     expect(fin.doc).toMatchObject({ status: "checking", paused: { reason: "resume_later" } })
-    expect(await CreditWallet.findOne({ userId }).lean()).toMatchObject({ balance, reserved: 0 })
+    // Lô kiểm lỗi được hoàn; chỉ còn lượt AI đổi tên của đề xuất mẫu sau baseline 0.1 (UC-85)
+    expect(await CreditWallet.findOne({ userId }).lean()).toMatchObject({ balance: balance - (await proposalCost(projectId)), reserved: 0 })
     expect(await Usage.find({ projectId, step_id: semanticBatchStep(1) }).distinct("state")).toEqual(["refunded"])
     // lô lỗi ⇒ chưa chạy kiểm chéo
     expect(await Usage.exists({ projectId, step_id: CROSS_CHECK_STEP })).toBeNull()

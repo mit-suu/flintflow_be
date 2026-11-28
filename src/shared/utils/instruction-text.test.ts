@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest"
-import { isInstructionText, isRealText, splitInstruction, tableBodyHasRealText, tableHasRealText } from "./instruction-text.js"
+import {
+  guidanceVerdict,
+  isCertainGuidance,
+  isInstructionText,
+  isRealText,
+  knownGuidanceMatcher,
+  splitInstruction,
+  tableBodyHasRealText,
+  tableHasRealText,
+  textGuidanceSignals
+} from "./instruction-text.js"
 
 describe("instruction-text", () => {
-  it("FLF-364: chỉ chữ trong [ ] / { } là hướng dẫn; ngoặc tròn, < >, câu mô tả mục là nội dung", () => {
+  // FLF-459: `isInstructionText` chỉ còn là mẫu ngoặc (một dấu hiệu) — file upload nhận diện theo lớp (`guidanceVerdict` bên dưới)
+  it("FLF-364: mẫu ngoặc chỉ khớp chữ trong [ ] / { }; ngoặc tròn, < >, câu mô tả mục không khớp", () => {
     expect(isInstructionText("[Describe the TLS version, certificate pinning…]")).toBe(true)
     expect(isInstructionText("{Ghi chú cho người soạn: liệt kê tài liệu}")).toBe(true)
     expect(isInstructionText("{{project name}}")).toBe(true)
@@ -45,5 +56,54 @@ describe("instruction-text", () => {
     expect(tableBodyHasRealText([["Role", "[Name]"]])).toBe(false)
     expect(tableBodyHasRealText([["Role", "Admin"]])).toBe(true)
     expect(tableBodyHasRealText(null)).toBe(false)
+  })
+
+  describe("FLF-459 - nhận diện chữ hướng dẫn theo lớp (business-flow §3.1.1)", () => {
+    it("dấu hiệu từ chữ: ngoặc trọn đoạn [ ] { } << >>, câu kiểu 'Mục này mô tả…' (kể cả trong ngoặc); ngoặc trong câu không tính", () => {
+      expect(textGuidanceSignals("[Describe the scope]")).toEqual(["brackets"])
+      expect(textGuidanceSignals("{{project name}}")).toEqual(["brackets"])
+      expect(textGuidanceSignals("<<Mô tả sản phẩm>>")).toEqual(["brackets"])
+      expect(textGuidanceSignals("Mục này mô tả phạm vi.")).toEqual(["describes"])
+      expect(textGuidanceSignals("This section describes the scope.")).toEqual(["describes"])
+      expect(textGuidanceSignals("[This section describes the scope.]")).toEqual(["brackets", "describes"])
+      expect(textGuidanceSignals("Hệ thống quản lý học sinh [ghi rõ phạm vi trường áp dụng].")).toEqual([])
+      expect(textGuidanceSignals("Giáo viên nhập điểm theo kỳ.")).toEqual([])
+    })
+
+    it("lớp 1 chắc chắn, không cần dấu hiệu khác", () => {
+      expect(guidanceVerdict({ text: "Bấm vào đây để nhập", certain: "placeholder" })).toEqual({ layer: 1, signals: ["placeholder"] })
+      expect(guidanceVerdict({ text: "Mô tả phạm vi", certain: "style" })?.layer).toBe(1)
+      expect(guidanceVerdict({ text: "Ghi chú ẩn", certain: "hidden" })?.layer).toBe(1)
+    })
+
+    it("lớp 2: trùng / gần trùng câu hướng dẫn của mẫu đã biết, kể cả không ngoặc; câu ngắn không so", () => {
+      const known = knownGuidanceMatcher(["[Provide the descriptions for the screens in the Screens Flow above]", "Liệt kê mọi tác nhân của hệ thống. Ghi rõ vai trò từng tác nhân."])
+      expect(guidanceVerdict({ text: "Provide the descriptions for the screens in the Screens Flow above", known })).toEqual({ layer: 2, signals: ["known"] })
+      expect(guidanceVerdict({ text: "[Provide descriptions for the screens in the Screen Flow above]", known })?.layer).toBe(2)
+      expect(guidanceVerdict({ text: "Liet ke moi tac nhan cua he thong.", known })?.layer).toBe(2)
+      expect(guidanceVerdict({ text: "The screens are listed in the table below with their owners", known })).toBeNull()
+      expect(knownGuidanceMatcher(["[Name]"])("[Name]")).toBe(false)
+      expect(knownGuidanceMatcher([])("Provide the descriptions for the screens")).toBe(false)
+    })
+
+    it("lớp 3: từ 2 dấu hiệu — ngoặc + in nghiêng là hướng dẫn; ngoặc + câu mô tả; màu + nghiêng", () => {
+      expect(guidanceVerdict({ text: "[Describe the scope]", format: ["italic"] })).toEqual({ layer: 3, signals: ["italic", "brackets"] })
+      expect(guidanceVerdict({ text: "[Mục này mô tả phạm vi hệ thống]" })).toEqual({ layer: 3, signals: ["brackets", "describes"] })
+      expect(guidanceVerdict({ text: "Ghi chú cho người soạn", format: ["italic", "color"] })?.layer).toBe(3)
+    })
+
+    it("lớp 4: đúng 1 dấu hiệu (chỉ có ngoặc, chỉ in nghiêng, chỉ câu mô tả) ⇒ chưa kết luận, không là hướng dẫn (đảo FLF-364)", () => {
+      expect(guidanceVerdict({ text: "[Describe the TLS version, certificate pinning…]" })).toEqual({ layer: 4, signals: ["brackets"] })
+      expect(guidanceVerdict({ text: "Tài liệu dành cho giáo viên.", format: ["italic"] })).toEqual({ layer: 4, signals: ["italic"] })
+      expect(guidanceVerdict({ text: "This section describes the scope." })?.layer).toBe(4)
+      expect(isCertainGuidance(4)).toBe(false)
+      expect([1, 2, 3].every((l) => isCertainGuidance(l as 1 | 2 | 3))).toBe(true)
+    })
+
+    it("không dấu hiệu / đoạn trống ⇒ nội dung thật (null)", () => {
+      expect(guidanceVerdict({ text: "Giáo viên nhập điểm theo kỳ." })).toBeNull()
+      expect(guidanceVerdict({ text: "  ", certain: "style" })).toBeNull()
+      expect(isCertainGuidance(null)).toBe(false)
+    })
   })
 })

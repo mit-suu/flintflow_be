@@ -11,6 +11,7 @@
 
 import type { CrSourceKind } from "../change-request/change-request.constants.js"
 import { Project } from "../project/project.model.js"
+import { Baseline } from "../spine/baseline.model.js"
 import * as flagsService from "../spine/flags.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { Mode1Error, type Mode1ErrorCode } from "./mode1.errors.js"
@@ -57,8 +58,9 @@ export const ruleProfileOf = async (projectId: string): Promise<RuleProfile | un
   const mode1 = project?.mode === "import"
   const fixed = project?.template_intent === "fixed"
   if (!mode1 && !fixed) return undefined
-  const profile = (await TemplateProfile.findOne({ projectId }, { layout: 1, section_segments: 1, section_slices: 1, migration_missing_sections: 1, migrated_base_at: 1, migrated_base_migration_id: 1, "migrated_base_spine.custom_sections": 1 }).lean()) as {
+  const profile = (await TemplateProfile.findOne({ projectId }, { layout: 1, target_structure: 1, section_segments: 1, section_slices: 1, migration_missing_sections: 1, migrated_base_at: 1, migrated_base_migration_id: 1, "migrated_base_spine.custom_sections": 1 }).lean()) as {
     layout?: LayoutEntry[]
+    target_structure?: { sections?: { section_id: string; status: string }[] } | null
     migration_missing_sections?: string[]
     migrated_base_at?: Date | null
     migrated_base_migration_id?: unknown
@@ -68,8 +70,11 @@ export const ruleProfileOf = async (projectId: string): Promise<RuleProfile | un
   } | null
   // FLF-366: đoạn nguyên văn của file import ⇒ cờ vàng khi văn xuôi gốc nhắc tới phần tử đã đổi tên / bị xoá
   const segments = mode1 ? (profile?.section_segments ?? []) : []
+  // FLF-455: mục riêng Ngoài phạm vi không bị luật theo mục riêng kiểm (BF nguyên tắc 4)
+  const outOfScope = new Set((profile?.target_structure?.sections ?? []).filter((x) => x.status === "out_of_scope" && x.section_id.startsWith("custom:")).map((x) => x.section_id))
+  const scopeExtra: Partial<RuleProfile> = outOfScope.size ? { outOfScope } : {}
   const mode1Profile = (extra: Partial<RuleProfile> = {}): RuleProfile =>
-    segments.length || Object.keys(extra).length ? { ...MODE1_RULE_PROFILE, ...extra, ...(segments.length ? { sectionSegments: segments } : {}) } : MODE1_RULE_PROFILE
+    segments.length || Object.keys(extra).length || outOfScope.size ? { ...MODE1_RULE_PROFILE, ...scopeExtra, ...extra, ...(segments.length ? { sectionSegments: segments } : {}) } : MODE1_RULE_PROFILE
   if (!fixed) return mode1Profile()
   const layout = profile?.layout ?? []
   if (!layout.length) return mode1 ? mode1Profile() : undefined
@@ -99,7 +104,7 @@ export const ruleProfileOf = async (projectId: string): Promise<RuleProfile | un
   // Luồng 2 của chế độ 3 (`mode = fpt`, flow2.service): đủ luật tạo mới, chỉ trên các mục của mẫu
   return mode1
     ? mode1Profile({ templateLayout, templateWrappers, templateFilled, ...migrationExtras, templateHeadings })
-    : { exclude: new Set(), downgrade: new Set(), templateLayout, templateWrappers, templateFilled, ...migrationExtras, templateHeadings }
+    : { exclude: new Set(), downgrade: new Set(), ...scopeExtra, templateLayout, templateWrappers, templateFilled, ...migrationExtras, templateHeadings }
 }
 
 type AnchorPart = Partial<Pick<Spine, "custom_sections" | "nfrs" | "glossary">>
@@ -164,7 +169,13 @@ export const mode1RuleProfileFor = async (projectId: string): Promise<RuleProfil
 
 /** Project mode 1 đã import xong (có baseline v0 trở lên) — từ đây mọi sửa phải qua CR. */
 export const changesRequireCr = async (projectId: string): Promise<boolean> => {
-  if (!(await isMode1Project(projectId))) return false
+  const project = await Project.findById(projectId).select("mode").lean()
+  if (project?.mode !== "import") {
+    // business-flow §3.2: sau baseline 1.0 mọi chế độ sửa qua C-*. Dự án tạo mới chuyển sang luồng này ngay lúc Lead ký;
+    // chuyển đổi lỗi thì dự án còn `fpt` đã ký (mở dự án sẽ chạy lại chuyển đổi) ⇒ vẫn bắt qua CR, không để sửa thẳng.
+    // Cùng điều kiện `needsConversion` (convert-from-fpt) nhưng không nạp service đó: nó kéo theo render / doc-version.
+    return !!project && (project.mode ?? "fpt") === "fpt" && !!(await Baseline.exists({ projectId, type: "generated" }))
+  }
   const spine = await spineRepository.get(projectId)
   return (spine?.baselines.length ?? 0) > 0
 }

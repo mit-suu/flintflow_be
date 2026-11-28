@@ -9,7 +9,8 @@
       "value": {
         "id": "OR08",
         "kind": "open_question",
-        "statement": "Who administers accounts once the product is live, and what can that role see?"
+        "statement": "Who administers accounts once the product is live, and what can that role see?",
+        "source_quote": "Người duyệt cần thấy mục tiêu kinh doanh đằng sau từng phần."
       },
       "reason": "S-1.4 gap"
     },
@@ -19,7 +20,8 @@
       "value": {
         "id": "OR09",
         "kind": "open_question",
-        "statement": "Which payment provider handles the credit purchases, and does it call back?"
+        "statement": "Which payment provider handles the credit purchases, and does it call back?",
+        "source_quote": "Make the cost of producing one document predictable"
       },
       "reason": "S-1.4 gap"
     },
@@ -29,7 +31,8 @@
       "value": {
         "id": "OR10",
         "kind": "open_question",
-        "statement": "What runs on a schedule — expiry, retry, digest — and how often?"
+        "statement": "What runs on a schedule (expiry, retry, digest) and how often?",
+        "source_quote": "Unused credits expire after 30 days."
       },
       "reason": "S-1.4 gap"
     }

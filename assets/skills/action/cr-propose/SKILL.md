@@ -1,7 +1,7 @@
 ---
 skill_id: cr-propose
 kind: action
-version: 2.7.0
+version: 2.11.0
 description: Mode 1 C-4 - for every affected Spine element conclude edit | comment | not_related and propose the Spine ops
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -40,6 +40,8 @@ and keep every other field exactly as it is - each changed field is a revision t
 {{owner_skill}}
 - Locations (`[L001] element path (section; why it was found)` then the element's current value as JSON):
 {{locations}}
+- Shape of the elements in those arrays (`*` = required field, nothing else allowed):
+{{element_schemas}}
 - Glossary: {{glossary}}
 
 ## Rules
@@ -92,7 +94,43 @@ and keep every other field exactly as it is - each changed field is a revision t
     teacher saves…"; a new label in `flows_in` / `flows_out` follows the existing labels). Never translate content
     into the language of the change request or the material. Names quoted from the document or the CR keep their
     original form. A proposal with text in another language fails the checks and is redone.
-11. `reason`, `comment_text` and `assumptions`: User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`, `feature:@B0012`), element paths (`actors[id=A02].name`), block ids (`B0012`) or location ids (`L001`). Name a section by its heading and an element by its name or document code (`UC-01` is fine).
+11. `reason`, `comment_text` and `assumptions`: User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`, `feature:@B0012`), element paths (`actors[id=A02].name`), block ids (`B0012`), location ids (`L001`) or file paths of embedded images (`word/media/image1.png`, `image_ref`; call a picture "the figure"). Name a section by its heading and an element by its name or document code (`UC-01` is fine).
+12. **Unreasonable request - warn, do not draft.** When doing what the CR asks at this location would clearly harm
+    the document (it contradicts a rule the document keeps, breaks a law or constraint the document states, makes two
+    requirements impossible together, or removes something other parts depend on) and the location does **not** say
+    "requester chose to proceed": set `warning` = `{ "text": one sentence naming the problem, "reason": one sentence
+    why it is unreasonable }`, `conclusion` = `comment`, `comment_text` = the warning, **no** `spine_ops`. The
+    requester then decides to proceed or drop it. A location marked "chose to proceed" (or a clarification answer
+    "Vẫn làm" / "Proceed" to a warning about it) is **never** warned again: draft the edit as asked. Ordinary
+    requests, even unusual ones, are not warnings - warn only on a real conflict. `warning` is `null` otherwise.
+13. **Out of scope sections.** A location marked OUT OF SCOPE belongs to a section the file kept verbatim and FlintFlow
+    does not write. With existing content: only a text edit (set that element's `blocks` changing just the words the
+    CR names, same structure); no new elements, no rule reasoning. Empty: conclude `comment` only.
+14. **Text rules.** Text you write for people (`reason`, `comment_text`, `assumptions`, `warning`, new content)
+    never uses the long dash character (use a hyphen " - ") and never contains the letters "FPT" (say "FlintFlow
+    standard template").
+
+15. **Shape of new values.** Every value you put in `spine_ops` (an `add` element, a `set` of a field) follows the shape
+    in *Shape of the elements* exactly: only the listed fields, the listed types, every required (`*`) field present,
+    enum values and patterns respected (a pattern such as `^[a-z]+( [a-z]+)*$` means lowercase English words only,
+    whatever the document language). Never invent a field (`type`, `references`) and never turn a list of strings into
+    objects. Unsure of a field ⇒ leave the optional ones out.
+16. **Removing a whole element.** The CR drops the element this location is (a function, a screen, a use case, a
+    message...) ⇒ `conclusion: edit` and `spine_ops: [ { "op": "remove", "path": "functions[id=FN012]" } ]` with the
+    element's own path. The code removes the references to it by itself. A comment that tells the reviewer to delete it
+    is **not** a substitute: the element would stay in the document. Removing the last function of a use case that is in
+    the list ⇒ also `remove` that use case.
+17. **Adding a whole function / screen.** The CR adds a function (or a screen) ⇒ from the location `functions[]` /
+    `screens[]` of the feature that holds it, `add` the complete element (id in the document's scheme, `feature_id` of
+    that feature, `screen_id` of the screen it belongs to when it has one, trigger, description, normal / abnormal
+    flows, validations). "Add this function" as a comment is never an answer when such a location is in the list. A use case
+    location in the list ⇒ `set` its `function_ids` to the old list plus the new function id.
+18. **Passage that mentions a removed element** (found by `mention`, about an element the CR removes): rewrite or drop
+    exactly that sentence so the document no longer refers to it (set that element's text or the `blocks` of that
+    `custom_sections` element, changing only that sentence). The sentence does not mention it any more after the edit ⇒ done.
+19. **Changing a value.** The CR changes a value (a number, a duration, an amount): change **every place in this element**
+    that states the old value with the same meaning (normal and abnormal flows, validations, interactions, guards, description),
+    not only the one the reason mentions. Leave a place unchanged only when the number means something else, and say so in `reason`.
 
 ## Output
 
@@ -102,5 +140,7 @@ JSON only:
 { "locations": [
   { "location_id": "L001", "conclusion": "edit", "reason": "The actor is renamed by the CR.",
     "spine_ops": [ { "op": "set", "path": "actors[id=A01].name", "value": "Student" } ], "assumptions": [] },
-  { "location_id": "L002", "conclusion": "not_related", "reason": "\"learner\" here is the course level, not the actor.", "spine_ops": [] } ] }
+  { "location_id": "L002", "conclusion": "not_related", "reason": "\"learner\" here is the course level, not the actor.", "spine_ops": [] },
+  { "location_id": "L003", "conclusion": "comment", "reason": "The CR conflicts with a kept rule.", "comment_text": "Removing the login step breaks BR-02.",
+    "spine_ops": [], "warning": { "text": "Removing the login step breaks BR-02.", "reason": "BR-02 requires every order to be placed by a signed-in user." } } ] }
 ```

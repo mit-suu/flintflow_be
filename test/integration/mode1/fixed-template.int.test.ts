@@ -10,7 +10,7 @@ vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await imp
 import mongoose from "mongoose"
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeMode1 } from "../../helpers/mode1.js"
-import { importAtBaselining } from "../../helpers/mode1-import-p4.js"
+import { finishReviewIfPending, importAtBaselining } from "../../helpers/mode1-import-p4.js"
 import { p, styled } from "../../../src/modules/docx-ooxml/testing/make-docx.js"
 import { startFinalize, waitForFinalize } from "../../../src/modules/import/finalize-jobs.js"
 import { readFile } from "node:fs/promises"
@@ -36,7 +36,8 @@ const version = async (projectId: string) => (await spineRepository.get(projectI
 const finalize = async (projectId: string, userId: string, importId: string, body: { complete?: boolean } = {}) => {
   await startFinalize(projectId, userId, { import_id: importId, base_version: await version(projectId), ...body })
   await waitForFinalize(importId)
-  return (await ImportedDocument.findById(importId))!
+  // FLF-453: AI giả không phát hiện gì ở vòng rà soát (business-flow §3.1.2) — test này không chủ đích kiểm vòng rà soát
+  return finishReviewIfPending(projectId, userId, importId)
 }
 
 describe("chế độ 3 - mẫu bắt buộc", () => {
@@ -73,7 +74,8 @@ describe("chế độ 3 - mẫu bắt buộc", () => {
     const open = spine.flags.filter((f) => !f.resolved_at)
     const empty = open.filter((f) => f.rule_id === "template_section_empty")
     expect(empty).toHaveLength(1)
-    expect(empty[0]).toMatchObject({ level: "yellow" })
+    // Theo flow 18/11: mục bắt buộc của mẫu còn trống là cờ đỏ, không waive
+    expect(empty[0]).toMatchObject({ level: "red" })
     expect(spine.custom_sections.find((c) => `custom:${c.id}` === empty[0].section_id)?.heading).toContain("Document Conventions")
     const absent = open.filter((f) => f.rule_id === "template_section_absent")
     expect(absent.length).toBeGreaterThan(0)

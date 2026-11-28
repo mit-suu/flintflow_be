@@ -6,7 +6,8 @@ import { spineSchema } from "./spine.schema.js"
 import type { Addendum, Spine } from "./spine.types.js"
 import { planTransaction } from "./op-engine.js"
 import type { Op } from "./op.types.js"
-import { briefCoreEntries, hasBriefCore, isBriefCoreTopic, isBriefPhase, isInBriefPhase, planBriefReextract, writesProjectVisionOrGoals } from "./brief-core.js"
+import { briefCoreEntries, hasBriefCore, normalizeBriefTopic, isBriefCoreTopic, isBriefPhase, isInBriefPhase, planBriefReextract, writesProjectVisionOrGoals } from "./brief-core.js"
+import { createEmptySpine } from "./spine.repository.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../fixtures/spine-fixture-19-screens.json"), "utf8")))
@@ -108,5 +109,28 @@ describe("op engine đánh dấu S-1.1 chờ duyệt lại", () => {
     expect(pending.changes.map((c) => c.path)).not.toContain("steps[id=S-1.1].status")
     const untouched = run(withS11("accepted"), [{ op: "set", path: "actors[id=A01].name", value: "Owner" }])
     expect(statusOfS11(untouched.spine)).toBe("accepted")
+  })
+})
+
+describe("planBriefReextract - S-1 chạy trước B-2 (FLF-466 P08)", () => {
+  const spineWith = (addendumContent: string): Spine => {
+    const spine = createEmptySpine({ name: "P" })
+    spine.steps = [{ id: "S-1.1", status: "accepted", first_seq: 1, last_seq: 2, accepted_at: "2026-11-01T00:00:00.000Z" }]
+    spine.addendum = [{ id: "AD01", topic: "vision", content: addendumContent, content_en: addendumContent, target_section: "fixed:1", captured_at: "2026-11-01T00:00:00.000Z" } as never]
+    return spine
+  }
+  it("lô do B-2.x ghi addendum không mở lại S-1.1; lô từ chat / bước khác vẫn mở lại", () => {
+    const before = spineWith("a")
+    const after = spineWith("b")
+    expect(planBriefReextract(after, before, "B-2.2")).toEqual([])
+    expect(planBriefReextract(after, before, null)).toHaveLength(1)
+    expect(planBriefReextract(after, before, "B-1.1")).toHaveLength(1)
+  })
+})
+
+describe("normalizeBriefTopic (FLF-449 D1)", () => {
+  it("target / objective / mục tiêu (hoa thường, dấu) ⇒ goals; topic khác giữ nguyên", () => {
+    for (const t of ["target", "Target", " OBJECTIVE ", "goal", "Mục tiêu", "goals"]) expect(normalizeBriefTopic(t)).toBe("goals")
+    for (const t of ["metric: no-show rate", "vision", "scale"]) expect(normalizeBriefTopic(t)).toBe(t)
   })
 })

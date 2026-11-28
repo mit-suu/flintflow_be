@@ -7,8 +7,9 @@
  *   - thuật ngữ viết-hoa-toàn-bộ xuất hiện trong văn xuôi nhưng chưa có trong `glossary[]`
  *     (heuristic — cố ý ồn để nhắc rà tay, KHÔNG chặn export, KHÔNG ghi vào đâu).
  *
- * Nhánh **LLM** (trùng lặp ngữ nghĩa, thuật ngữ lệch) chỉ là stub sau flag
- * `CONSISTENCY_LLM_ENABLED` — không gọi model thật ở T15 (điều cấm §3 coding-rules).
+ * Nhánh **AI** (trùng lặp ngữ nghĩa, thuật ngữ lệch, thiếu chỗ liệt kê) chạy ở lượt bước S-8.4
+ * (`pipeline/s9/ai-review.ts`, ghi cờ vàng `ai_review`), KHÔNG chạy ở đây: ghép tài liệu / GET /document / export
+ * không bao giờ gọi model.
  *
  * Hàm ở đây KHÔNG ghi Spine, KHÔNG chặn assemble/export — kết quả chỉ để log/quan sát.
  */
@@ -50,9 +51,6 @@ export const missingImageFindings = (diagramIds: readonly string[]): Consistency
     path: `diagrams[id=${id}]`,
     message: `Diagram ${id} has no PNG yet - a placeholder image is used until it is rendered`
   }))
-
-/** `true` chỉ khi biến môi trường được đặt đúng chuỗi — mặc định tắt (S-8.4 nhánh LLM là stub). */
-export const CONSISTENCY_LLM_ENABLED = process.env.CONSISTENCY_LLM_ENABLED === "true"
 
 const findDuplicateSectionNumbers = (sections: RenderedSection[]): ConsistencyFinding[] => {
   const counts = new Map<string, number>()
@@ -112,17 +110,7 @@ const deterministicChecks = (spine: Spine, sections: RenderedSection[]): Consist
   ...findUndefinedGlossaryTerms(spine, sections)
 ]
 
-/**
- * Stub nhánh LLM (S-8.4: trùng lặp ngữ nghĩa, thuật ngữ lệch). Không gọi model thật —
- * chỉ tồn tại để `runConsistencyPass` có chỗ cắm khi có PR hiện thực thật kèm skill riêng.
- */
-async function llmConsistencyPass(_spine: Spine, _sections: RenderedSection[]): Promise<ConsistencyFinding[]> {
-  return []
-}
-
-/** S-8.4: chạy nhánh tất định luôn; nhánh LLM chỉ chạy khi `CONSISTENCY_LLM_ENABLED`. */
+/** S-8.4 nhánh tất định — chạy mỗi lần ghép tài liệu, không gọi model. Giữ `async` để người gọi không phải đổi. */
 export async function runConsistencyPass(spine: Spine, sections: RenderedSection[]): Promise<ConsistencyFinding[]> {
-  const deterministic = deterministicChecks(spine, sections)
-  if (!CONSISTENCY_LLM_ENABLED) return deterministic
-  return [...deterministic, ...(await llmConsistencyPass(spine, sections))]
+  return deterministicChecks(spine, sections)
 }

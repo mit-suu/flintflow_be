@@ -17,9 +17,11 @@ import {
   chunkBlocks,
   codeSignals,
   combineAiConfidence,
+  contentMismatchOf,
   deterministicTableItems,
   dropMutualRelations,
   extractionPlan,
+  headingOf,
   itemsFromAi,
   keepMentionedRules,
   mergeItems,
@@ -31,9 +33,12 @@ import {
   shortName,
   splitList,
   stepsHash,
-  visionItems
+  passesSpineShape,
+  visionItems,
+  withContentSections
 } from "./extract.service.js"
-import { IdAllocator, flattenItem, idKey, type EntityItem } from "./extracted-entities.js"
+import { CONTENT_TARGETS, contentSectionId, isExtractableSection, otherTargetsOf, targetsOf } from "./extract-targets.js"
+import { IdAllocator, findKnownId, flattenItem, idKey, type EntityItem } from "./extracted-entities.js"
 import type { ITemplateProfile, TableMapEntry } from "./template-profile.model.js"
 import { FIELD_CONFIDENCE_THRESHOLD } from "./import.constants.js"
 import { indentedCells, tableGrid } from "./table-rows.js"
@@ -108,6 +113,20 @@ describe("sectionAiSteps - kế hoạch lượt AI (chung cho lượt chạy và
     { ...block(block_id, "image", "", `body/p[${block_id}]`, "fixed:2.2.1"), image_ref: `word/media/${block_id}.png` },
     block(`${block_id}C`, "caption", caption, `body/p[${block_id}c]`, "fixed:2.2.1")
   ]
+
+  it("FLF-462: ô bảng lớp 4 (1 dấu hiệu) đi kèm lô chứa bảng làm ứng viên; ô lớp 3 / không dấu hiệu thì không; băm đổi theo ứng viên", () => {
+    const tbl = block("B0010", "table", "a | b\nc | d", "body/tbl[0]", "fixed:2.2.1")
+    const cell = (id: string, text: string, layer?: 1 | 2 | 3 | 4): Lite => ({ ...block(id, "table_cell", text, `body/tbl[0]/tr[0]/tc[${id}]/p[0]`, "fixed:2.2.1"), ...(layer ? { guidance_layer: layer } : {}) })
+    const blocks: Lite[] = [tbl, cell("B0011", "a", 4), cell("B0012", "b", 3), cell("B0013", "c"), cell("B0014", "d", 4)]
+    const steps = sectionAiSteps("fixed:2.2.1", blocks, none)
+    expect(steps).toHaveLength(1)
+    const step = steps[0]
+    expect(step.kind === "text" && step.batch.map((b) => b.block_id)).toEqual(["B0010"])
+    expect(step.kind === "text" && step.guidance_cells?.map((c) => c.block_id)).toEqual(["B0011", "B0014"])
+    const noCand = sectionAiSteps("fixed:2.2.1", [tbl, cell("B0011", "a"), cell("B0012", "b", 3)], none)
+    expect(noCand[0].kind === "text" && noCand[0].guidance_cells).toBeUndefined()
+    expect(stepsHash(noCand)).not.toBe(stepsHash(steps))
+  })
 
   it("ảnh đọc được trước, rồi lô chữ; bỏ heading, bảng đã đọc tất định, ảnh chụp màn hình; băm ổn định", () => {
     const blocks: Lite[] = [
@@ -397,6 +416,35 @@ describe("deterministicTableItems - bảng khớp đủ cột (G7)", () => {
   })
 })
 
+describe("FLF-476: cột \"Tên\" của bảng chức năng không màn hình (3.1.4) - ChoViet #3", () => {
+  it("bảng 'Tên | Kích hoạt | Mô tả' ⇒ cột 0 là name, cột 1 là trigger, cột 2 là description (trước đây không cột nào khớp 'Tên')", () => {
+    const rows = [
+      ["Tên", "Kích hoạt", "Mô tả"],
+      ["Hoàn tất đơn hàng đã giao", "Người bán xác nhận đã giao", "Đánh dấu các đơn hàng này là đã hoàn tất để tính doanh thu."]
+    ]
+    const m = matchTable(rows, "fixed:3.1.4")
+    expect(m.entity).toBe("functions")
+    expect(m.columns.map((c) => c.field_path)).toEqual(["functions[].name", "functions[].trigger", "functions[].description"])
+  })
+
+  it("phần đọc tất định của bảng 3.1.4 có tên trùng tiêu đề heading 3.5.7 ⇒ ghép theo tên (không cấp id mới) - mô phỏng ghép tại extractSections", () => {
+    const rows = [
+      ["Tên", "Kích hoạt", "Mô tả"],
+      ["Hoàn tất đơn hàng đã giao", "Người bán xác nhận đã giao", "Đánh dấu các đơn hàng này là đã hoàn tất để tính doanh thu."]
+    ]
+    const m = matchTable(rows, "fixed:3.1.4")
+    const t = { ...block("B0900", "table", "", "body/tbl[12]", "fixed:3.1.4"), rows }
+    const profile = { table_map: m.columns.map((c) => ({ block_id: "B0900", column_index: c.column_index, header: c.header, field_path: c.field_path, confidence: c.confidence, confirmed: true })) } as unknown as ITemplateProfile
+    const items = deterministicTableItems(t, rows, profile)!
+    expect(items[0].value.name).toBe("Hoàn tất đơn hàng đã giao")
+    expect(items[0].id).toBeNull()
+    // Cùng bước ghép của `extractSections` (extract.service.ts): item không mã ⇒ dùng id của phần tử cùng tên đã biết
+    const known: EntityItem[] = [{ entity: "functions", id: "FR-3.5.7", value: { name: "Hoàn tất đơn hàng đã giao" }, confidence: 1, field_confidence: {}, source_block_ids: [], origin: "deterministic" }]
+    const resolvedId = findKnownId([...known, ...items], "functions", items[0].value.name) ?? new IdAllocator().next("functions")
+    expect(resolvedId).toBe("FR-3.5.7")
+  })
+})
+
 describe("chunkBlocks - lô gửi AI", () => {
   const b = (id: string, len: number) => ({ block_id: id, text: "x".repeat(len) })
 
@@ -503,6 +551,28 @@ describe("itemsFromAi - output model ⇒ item", () => {
     expect(keepMentionedRules([fn(["BR05", "BR-01", "Only admins can log out."])], new Set([idKey("BR-05")]))[0].value.business_rule_ids).toEqual(["BR05"])
     const ok = fn(["BR-05"])
     expect(keepMentionedRules([ok], new Set([idKey("BR-05")]))[0]).toBe(ok)
+  })
+
+  it("FLF-476 lưới an toàn: đoạn văn (không bảng, không ảnh) chỉ có khoá, không tên, không khớp phần tử đã biết ⇒ không tạo mới", () => {
+    // Khoá "UC-02" không khớp phần tử đã biết nào (known rỗng), không có tên ⇒ bỏ hẳn, không cấp id mới
+    const dropped = itemsFromAi({ section_id: "fixed:2.2.1", items: [item({ key: "UC-02", value: {} })], unmapped_block_ids: [] }, ctx())
+    expect(dropped).toEqual([])
+    // Có tên ⇒ vẫn tạo phần tử mới như trước (không phải lưới an toàn)
+    const named = itemsFromAi({ section_id: "fixed:2.2.1", items: [item({ key: "UC-02", value: { name: "Log in" } })], unmapped_block_ids: [] }, ctx())
+    expect(named.map((i) => i.value)).toEqual([{ name: "Log in" }])
+    // Khoá khớp phần tử đã biết (bảng) dù không tên ⇒ ghép vào phần tử đó, không bị lưới an toàn chặn
+    const known: EntityItem[] = [{ entity: "use_cases", id: "02", value: { name: "Log in" }, confidence: 1, field_confidence: {}, source_block_ids: [], origin: "deterministic" }]
+    const matched = itemsFromAi({ section_id: "fixed:2.2.1", items: [item({ key: "UC-02", value: {} })], unmapped_block_ids: [] }, ctx(known))
+    expect(matched.map((i) => i.id)).toEqual(["02"])
+    // Ảnh (fromImage: true) không áp lưới an toàn - khoá model tự đặt trên sơ đồ vẫn được tạo mới như trước
+    const fromImage = itemsFromAi(
+      { section_id: "fixed:2.2.1", items: [item({ key: "UC-02", value: {} })], unmapped_block_ids: [] },
+      { ...ctx(), fromImage: true }
+    )
+    expect(fromImage.length).toBe(1)
+    // Loại không bắt buộc có tên (actors) không áp lưới an toàn
+    const actor = itemsFromAi({ section_id: "fixed:1", items: [item({ entity: "actors", key: "ACT-9", value: {} })], unmapped_block_ids: [] }, ctx([], "fixed:1"))
+    expect(actor.length).toBe(1)
   })
 
   it("section function: item function đầu tiên nhận id của function theo heading", () => {
@@ -698,10 +768,11 @@ describe("ảnh diagram (mode 1 v3 phase 5)", () => {
 })
 
 describe("FLF-343 - độ tin I-4 = điểm AI kết hợp tín hiệu code", () => {
-  it("combineAiConfidence: AI × 0.6 + trung bình tín hiệu × 0.4; không có tín hiệu ⇒ giữ điểm AI", () => {
+  it("combineAiConfidence: AI × 0.6 + trung bình tín hiệu × 0.4; không có tín hiệu ⇒ phần code tính 0 (FLF-444)", () => {
     expect(combineAiConfidence(0.9, [1, 1, 1])).toBe(0.94)
     expect(combineAiConfidence(0.9, [0, 0])).toBe(0.54)
-    expect(combineAiConfidence(0.5, [])).toBe(0.5)
+    // FLF-444 (BF đoạn *Độ tin*): điểm AI không bao giờ là tín hiệu duy nhất - trước đây không có tín hiệu ⇒ giữ điểm AI
+    expect(combineAiConfidence(0.5, [])).toBe(0.3)
     // AI 0.5 + code khớp hết = 0.70 ⇒ vẫn bị chặn dưới ngưỡng (AI < 0.6 luôn Cần xem)
     expect(combineAiConfidence(0.5, [1, 1, 1])).toBe(0.69)
     expect(combineAiConfidence(0.6, [1, 1, 1])).toBe(0.76)
@@ -792,5 +863,158 @@ describe("FLF-411 - chữ của mẫu ở SRS viết dở (BF §3.1.1)", () => {
     ]
     const steps = sectionAiSteps("fixed:1", blocks, { items: [], handled: new Set(), consumed: new Set(), verbatim: new Set() })
     expect(steps.map((s) => (s.kind === "image" ? `img:${s.block.block_id}` : s.batch.map((b) => b.block_id).join("+")))).toEqual(["B0207"])
+  })
+})
+
+describe("FLF-444 - độ tin phần tử I-4: tín hiệu code + điểm AI, điểm AI không bao giờ là tín hiệu duy nhất", () => {
+  it("điểm AI cao nhưng không có tín hiệu code ⇒ không được độ tin cao (dưới ngưỡng xác nhận)", () => {
+    expect(combineAiConfidence(0.99, [])).toBeLessThan(FIELD_CONFIDENCE_THRESHOLD)
+    expect(combineAiConfidence(1, [0, 0, 0])).toBeLessThan(FIELD_CONFIDENCE_THRESHOLD)
+    // Chỉ có block nguồn hợp lệ + đủ field Spine, chữ nguồn không có phần tử ⇒ vẫn Cần xem
+    expect(combineAiConfidence(1, [1, 0, 1])).toBeLessThan(FIELD_CONFIDENCE_THRESHOLD)
+    // Có tín hiệu code đủ (nguồn, khớp chữ, luật Spine, khớp mục) ⇒ qua ngưỡng
+    expect(combineAiConfidence(0.9, [1, 1, 1, 0.9])).toBeGreaterThanOrEqual(FIELD_CONFIDENCE_THRESHOLD)
+  })
+
+  it("itemsFromAi: AI tự chấm 0.98, phần tử không có trong chữ nguồn ⇒ độ tin item và field dưới ngưỡng", () => {
+    const [it0] = itemsFromAi(
+      {
+        section_id: "content:@B0001",
+        items: [{ entity: "glossary", key: null, value: { term: "Quantum ledger", definition: "Invented" }, confidence: 0.98, field_confidence: { definition: 0.97 }, source_block_ids: ["B0002"] }],
+        unmapped_block_ids: []
+      },
+      { sectionId: "content:@B0001", alloc: new IdAllocator(), known: [], sectionFunction: null, validBlocks: new Set(["B0002"]), blockText: new Map([["B0002", "The system shall export reports as PDF."]]), sectionConfidence: null }
+    )
+    expect(it0.confidence).toBeLessThan(FIELD_CONFIDENCE_THRESHOLD)
+    expect(it0.field_confidence.definition).toBeLessThan(FIELD_CONFIDENCE_THRESHOLD)
+  })
+
+  it("itemsFromAi: phần tử văn xuôi không mã, có trong chữ nguồn ⇒ hệ thống cấp mã, độ tin qua ngưỡng", () => {
+    const [it0] = itemsFromAi(
+      {
+        section_id: "content:@B0001",
+        items: [{ entity: "nfrs", key: null, value: { statement: "The system shall export reports as PDF within 5 seconds.", kind: "quantitative" }, confidence: 0.9, field_confidence: {}, source_block_ids: ["B0002"] }],
+        unmapped_block_ids: []
+      },
+      {
+        sectionId: "content:@B0001",
+        alloc: new IdAllocator(),
+        known: [],
+        sectionFunction: null,
+        validBlocks: new Set(["B0002"]),
+        blockText: new Map([["B0002", "The system shall export reports as PDF within 5 seconds."]]),
+        sectionConfidence: null
+      }
+    )
+    expect(it0.id).toBe("NFR-01")
+    expect(it0.confidence).toBeGreaterThanOrEqual(FIELD_CONFIDENCE_THRESHOLD)
+  })
+
+  it("codeSignals: luật Spine (field định danh của mảng) và đúng một đối tượng tương ứng", () => {
+    const blockText = new Map([["B0001", "UC-01 Register account lets the learner sign up."]])
+    const valid = new Set(["B0001"])
+    expect(codeSignals({ entity: "use_cases", key: "UC-01", value: { name: "Register account" }, source_block_ids: ["B0001"] }, { validBlocks: valid, blockText })).toEqual([1, 1, 1])
+    // thiếu tên ⇒ không qua luật Spine
+    expect(codeSignals({ entity: "use_cases", key: "UC-01", value: { description: "Register account" }, source_block_ids: ["B0001"] }, { validBlocks: valid, blockText })).toEqual([1, 1, 0])
+    // mã trỏ một phần tử, tên trỏ phần tử khác ⇒ không phải đúng một đối tượng
+    expect(codeSignals({ entity: "use_cases", key: "UC-01", value: { name: "Register account" }, source_block_ids: ["B0001"] }, { validBlocks: valid, blockText, ambiguous: true })).toEqual([1, 0, 1])
+  })
+
+  it("itemsFromAi: mã của phần tử này, tên của phần tử khác ⇒ tín hiệu khớp 0, Cần xem", () => {
+    const known: EntityItem[] = [
+      { entity: "use_cases", id: "UC-01", value: { name: "Register account" }, confidence: 1, field_confidence: {}, source_block_ids: ["B0001"], origin: "deterministic" },
+      { entity: "use_cases", id: "UC-02", value: { name: "Log in" }, confidence: 1, field_confidence: {}, source_block_ids: ["B0001"], origin: "deterministic" }
+    ]
+    const [it0] = itemsFromAi(
+      { section_id: "fixed:2.2.1", items: [{ entity: "use_cases", key: "UC-01", value: { name: "Log in" }, confidence: 0.95, field_confidence: {}, source_block_ids: ["B0003"] }], unmapped_block_ids: [] },
+      { sectionId: "fixed:2.2.1", alloc: new IdAllocator(), known, sectionFunction: null, validBlocks: new Set(["B0003"]), blockText: new Map([["B0003", "UC-01 Log in"]]), sectionConfidence: 1 }
+    )
+    expect(it0.confidence).toBeLessThan(FIELD_CONFIDENCE_THRESHOLD)
+  })
+
+  it("passesSpineShape: tên / câu yêu cầu / thuật ngữ / nội dung thông báo; project cần ít nhất một field", () => {
+    expect(passesSpineShape("functions", { name: "Export report" })).toBe(true)
+    expect(passesSpineShape("functions", { trigger: "Click" })).toBe(false)
+    expect(passesSpineShape("nfrs", { statement: "Fast" })).toBe(true)
+    expect(passesSpineShape("glossary", { definition: "x" })).toBe(false)
+    expect(passesSpineShape("messages", { text: "Saved" })).toBe(true)
+    expect(passesSpineShape("permissions", { screen_id: "SCR-01", role_id: "R01" })).toBe(true)
+    expect(passesSpineShape("project", {})).toBe(false)
+    expect(passesSpineShape("project", { vision: "Lumen" })).toBe(true)
+  })
+})
+
+describe("FLF-444 - mục đọc theo nội dung (heading tự đặt) và mục nhiều loại nội dung", () => {
+  it("targetsOf: mục đọc theo nội dung nhận mọi loại; mục đã khớp nhận thêm loại ngoài mục", () => {
+    const id = contentSectionId("B0042")
+    expect(id).toBe("content:@B0042")
+    expect(targetsOf(id)).toEqual(CONTENT_TARGETS)
+    expect(isExtractableSection(id)).toBe(true)
+    expect(otherTargetsOf(id)).toEqual([])
+    expect(otherTargetsOf("fixed:3.1.4")).toContain("nfrs")
+    expect(otherTargetsOf("fixed:3.1.4")).not.toContain("functions")
+    // mục không trích (Record of Changes, nhóm) không nhận loại nào
+    expect(otherTargetsOf("fixed:I")).toEqual([])
+    expect(otherTargetsOf("group:3")).toEqual([])
+  })
+
+  it("withContentSections: khối dưới heading không khớp ⇒ content:@<heading>; mục trống / chỉ hướng dẫn, nhóm, mục đã khớp giữ nguyên", () => {
+    const h = (id: string, text: string, level: number, section: string | null) => ({ ...block(id, "heading", text, `body/p[${id}]`, section), level })
+    const blocks = [
+      h("B0001", "1 Product Overview", 1, "fixed:1"),
+      block("B0002", "paragraph", "Lumen is a learning platform.", "body/p[2]", "fixed:1"),
+      h("B0003", "Phần 3", 1, null),
+      block("B0004", "paragraph", "The system shall export reports as PDF.", "body/p[4]", null),
+      h("B0005", "Những gì hệ thống làm được", 2, null),
+      block("B0006", "list_item", "Learners can enroll in a course.", "body/p[6]", null),
+      h("B0007", "Phụ lục trống", 1, null),
+      block("B0008", "paragraph", "[Describe the appendix here]", "body/p[8]", null),
+      h("B0009", "Ghi chú", 1, null),
+      h("B0010", "3 Functional Requirements", 1, null),
+      block("B0011", "paragraph", "This chapter lists functions.", "body/p[11]", null)
+    ]
+    const headingMap = [
+      { block_id: "B0001", section_id: "fixed:1" },
+      { block_id: "B0003", section_id: "unmapped" },
+      { block_id: "B0005", section_id: "unmapped" },
+      { block_id: "B0007", section_id: "unmapped" },
+      { block_id: "B0009", section_id: "unmapped" },
+      { block_id: "B0010", section_id: "group:3" }
+    ]
+    const out = withContentSections(blocks, headingMap)
+    expect(out.map((b) => [b.block_id, b.section_id])).toEqual([
+      ["B0001", "fixed:1"],
+      ["B0002", "fixed:1"],
+      ["B0003", "content:@B0003"],
+      ["B0004", "content:@B0003"],
+      ["B0005", "content:@B0005"],
+      ["B0006", "content:@B0005"],
+      ["B0007", null],
+      ["B0008", null],
+      ["B0009", null],
+      ["B0010", null],
+      ["B0011", null]
+    ])
+    expect(extractionPlan(out)).toEqual(["fixed:1", "content:@B0003", "content:@B0005"])
+    // Lượt AI của mục đọc theo nội dung gửi chữ thật (không gửi heading)
+    const steps = sectionAiSteps("content:@B0005", out, { items: [], handled: new Set(), consumed: new Set(), verbatim: new Set() })
+    expect(steps.map((s) => (s.kind === "text" ? s.batch.map((b) => b.block_id) : []))).toEqual([["B0006"]])
+  })
+
+  it("headingOf: mục đọc theo nội dung lấy tiêu đề của block heading, không có độ tin khớp mục", () => {
+    const profile = { heading_map: [{ block_id: "B0003", section_id: "unmapped", heading_text: "Phần 3", confidence: 0.4 }] } as unknown as ITemplateProfile
+    expect(headingOf(profile, "content:@B0003")).toEqual({ heading_text: "Phần 3" })
+    expect(headingOf(profile, "content:@B0999")).toBeUndefined()
+  })
+
+  it("contentMismatchOf: tên đúng nội dung sai (AI báo, hoặc mọi phần tử thuộc loại ngoài mục); mục nhiều loại không tính", () => {
+    // FLF-462: mới phát hiện ⇒ `confirmed: false` (chờ người xác nhận ở bước 1.6)
+    expect(contentMismatchOf("fixed:2.2.2", ["use_cases"], [], "test cases")).toEqual({ by_heading: ["use_cases"], by_content: [], note: "test cases", confirmed: false })
+    expect(contentMismatchOf("fixed:2.2.2", ["use_cases"], [{ entity: "verifications" }], null)).toEqual({ by_heading: ["use_cases"], by_content: ["verifications"], note: null, confirmed: false })
+    // Mục chức năng có cả NFR ⇒ một section nhiều loại nội dung, không phải lệch
+    expect(contentMismatchOf("fixed:3.1.4", ["functions"], [{ entity: "functions" }, { entity: "nfrs" }], null)).toBeNull()
+    expect(contentMismatchOf("fixed:3.1.4", ["functions"], [], null)).toBeNull()
+    // Mục đọc theo nội dung không có tên để lệch
+    expect(contentMismatchOf("content:@B0003", CONTENT_TARGETS, [{ entity: "nfrs" }], "anything")).toBeNull()
   })
 })

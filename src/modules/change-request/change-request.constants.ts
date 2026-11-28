@@ -3,8 +3,9 @@
 /** Nguồn của CR (UC-48): bắt buộc, để truy vết yêu cầu sửa đến từ đâu. */
 /** `chat` (FLF-182): CR tự tạo từ lệnh sửa trong chat sau baseline v1 (mode 1 v2, D3). */
 /** `reference_document` (FLF-338): CR tạo từ danh sách rút yêu cầu của tài liệu thô — `ref` = tên tài liệu + mã đoạn. */
+/** `revert` (BF §3.2 hoàn tác): CR tạo từ "hoàn tác CR-xxx" — `source.ref` = mã CR gốc; vị trí dựng từ `before` của các Change của CR đó. */
 /** `template_migration`: CR do hệ thống tạo khi áp dụng một lần đổi mẫu — chỉ đường ghi riêng của `template-migration` sinh ra, client không tạo được. */
-export const CR_SOURCE_KINDS = ["stakeholder_email", "meeting_minutes", "gap_report", "reupload", "viewer_comment", "verbal", "chat", "reference_document", "template_migration"] as const
+export const CR_SOURCE_KINDS = ["stakeholder_email", "meeting_minutes", "gap_report", "reupload", "viewer_comment", "verbal", "chat", "reference_document", "template_migration", "revert"] as const
 export type CrSourceKind = (typeof CR_SOURCE_KINDS)[number]
 
 /**
@@ -24,7 +25,11 @@ export const NEW_CR_SOURCE_KINDS = ["stakeholder_email", "meeting_minutes", "gap
  * `vector` (hybrid retrieval): phần tử gần nghĩa với CR theo Atlas Vector Search (`embedding/vector-search.ts`) — thay nguồn
  * `keyword` khi index embedding dùng được; điểm nằm ở `vector_score` của vị trí.
  */
-export const LOCATION_FOUND_BY = ["spine_link", "mention", "keyword", "preview", "diagram", "vector"] as const
+/**
+ * `count` (FLF-473): phần tử mang câu đếm số phần tử trong văn xuôi ("Hệ thống có 10 use case") mà CR làm đổi đúng
+ * số phần tử của loại đó (thêm/xoá) — `count-mentions.ts`. Không qua AI để tìm, số đúng do code đếm (C-4 đưa vào prompt).
+ */
+export const LOCATION_FOUND_BY = ["spine_link", "mention", "keyword", "preview", "diagram", "vector", "count"] as const
 export type LocationFoundBy = (typeof LOCATION_FOUND_BY)[number]
 
 /** Kết luận của C-4 cho từng vị trí (nút 3.6, UC-81). Vị trí chưa kết luận chặn nộp (CR_LOCATION_UNCONCLUDED). */
@@ -45,6 +50,8 @@ export const formatCrId = (seq: number): string => `CR-${String(seq).padStart(3,
 export const CR_MATERIAL_KINDS = ["text", "file", "image"] as const
 export type CrMaterialKind = (typeof CR_MATERIAL_KINDS)[number]
 export const CR_MAX_MATERIALS = 10
+/** FLF-445: số cờ tối đa một CR tạo từ nhóm cờ; nhóm lớn hơn thì tách. */
+export const CR_MAX_FLAG_IDS = 50
 /** Chữ giữ lại mỗi tài liệu; dài hơn ⇒ cắt, `truncated = true`. */
 export const CR_MATERIAL_MAX_CHARS = 20_000
 export const MATERIAL_ID_PATTERN = /^M\d{2,}$/

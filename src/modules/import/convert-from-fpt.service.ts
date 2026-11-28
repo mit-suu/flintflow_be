@@ -24,6 +24,7 @@ import { renderVersionFile } from "../doc-version/render-version.js"
 import { captureTemplateSourceBinding } from "../doc-version/template-source-binding.js"
 import { listChangesForRecord } from "../render/assemble.service.js"
 import { versionFileName } from "../doc-version/versioning.js"
+import { projectCode } from "../project/project-code.js"
 import { notify } from "../notification/notification.service.js"
 import { Project } from "../project/project.model.js"
 import { Baseline } from "../spine/baseline.model.js"
@@ -34,7 +35,7 @@ import { projectLanguages } from "../translation/translation.service.js"
 import { ImportedDocument } from "./imported-document.model.js"
 import { buildStepPlan } from "./step-plan.js"
 import { TemplateProfile } from "./template-profile.model.js"
-import { autoSaveSkeleton } from "./template-skeleton.service.js"
+import { proposeTemplateFromBaseline } from "./template-skeleton.service.js"
 
 /** Version gốc của dự án chuyển đổi — bản Lead đã ký. */
 export const CONVERTED_DOC_VERSION = "1.0"
@@ -120,10 +121,10 @@ const convert = async (projectId: string, userId: string, opts: ConvertOptions):
       projectId,
       file_ref: null,
       sha256: createHash("sha256").update(buffer).digest("hex"),
-      original_name: versionFileName({ name: project.name, release: true, base: CONVERTED_DOC_VERSION }),
+      original_name: versionFileName({ name: project.name, code: projectCode(projectId), release: true, base: CONVERTED_DOC_VERSION }),
       size: buffer.length,
       preflight: { status: "accepted", issues: [] },
-      stamp: { project_id: projectId, version: CONVERTED_DOC_VERSION, source: CONVERT_STAMP_SOURCE },
+      stamp: { project_id: projectId, project_code: projectCode(projectId), version: CONVERTED_DOC_VERSION, source: CONVERT_STAMP_SOURCE },
       confirmed_latest_at: at,
       status: "delivered",
       created_by: userId
@@ -169,7 +170,7 @@ const convert = async (projectId: string, userId: string, opts: ConvertOptions):
 
   const result = { doc_version: CONVERTED_DOC_VERSION, baseline_id: entry.id }
   // FLF-395 (D12): dự án chế độ 3 (file mẫu của khách) ký 1.0 ⇒ tự lưu khung; mode 2 không file nền ⇒ bỏ qua bên trong
-  await autoSaveSkeleton(projectId, userId, fileRef)
+  await proposeTemplateFromBaseline(projectId, userId, fileRef)
   if (opts.quiet) return result
   scheduleEmbeddingSync(projectId)
   void notify(userId, {

@@ -7,7 +7,8 @@
  */
 import mongoose, { Schema, Document } from "mongoose"
 import type { Op } from "../spine/op.types.js"
-import type { MigrationGroups, TableShape } from "./classify.js"
+import type { MigrationGroups, OldSectionData, TableShape } from "./classify.js"
+import type { HeadingNumbering } from "./numbering.js"
 import type { EditedSection } from "./edited-since.js"
 import type { NewHeading, OldHeading, PairingResult } from "./pair-sections.js"
 
@@ -33,10 +34,11 @@ export interface MigrationFrom {
   language: string
   template_family: string | null
   headings: OldHeading[]
+  /** FLF-466: dự án đang theo mẫu chuẩn FlintFlow (chưa đổi mẫu nào, hoặc lần đổi mẫu gần nhất áp dụng sang mẫu chuẩn). Thiếu ở bản ghi cũ ⇒ `false`. */
+  standard?: boolean
 }
 
-export interface MigrationTo {
-  template_id: mongoose.Types.ObjectId
+interface MigrationToBase {
   version: number
   name: string
   visibility: "org" | "project"
@@ -47,11 +49,25 @@ export interface MigrationTo {
   headings: NewHeading[]
 }
 
+/**
+ * Mẫu đích (FLF-466): mẫu của org / bản riêng của dự án (`template_id`), hoặc **mẫu chuẩn FlintFlow** (`standard`, không có họ mẫu:
+ * file + mapping dựng sẵn theo ngôn ngữ đích, kind nội bộ `standard`). Bản ghi cũ không có `standard` ⇒ đọc là `false`.
+ */
+export type MigrationTo = MigrationToBase & ({ standard: true; template_id: null } | { standard: false; template_id: mongoose.Types.ObjectId })
+
 export interface MigrationAnalysis {
   old_tables: Record<string, TableShape[]>
   new_tables: Record<string, TableShape[]>
   /** Đổi ngược: mục đã sửa sau lần đổi mẫu trước; `null` = đổi xuôi. */
   edited: EditedSection[] | null
+  /** Tóm tắt dữ liệu Spine của mục cũ theo `old_key` (chấm chỗ đặt). Bản ghi cũ không có. */
+  old_data?: Record<string, OldSectionData>
+  /** `new_key` của mục mẫu đích có dữ liệu Spine để in dù không có cặp. Bản ghi cũ không có. */
+  new_filled?: string[]
+  /** Mẫu đích có bảng lịch sử sửa đổi đứng trước heading đầu. Bản ghi cũ không có. */
+  pre_heading_record?: boolean
+  /** Kiểu đánh số heading của mẫu đích (`text` gõ tay / `auto` Word tự đánh / `none`). Bản ghi cũ không có ⇒ suy từ chữ heading. */
+  target_numbering?: HeadingNumbering
 }
 
 /** Ảnh chụp trước khi áp dụng — đủ để khôi phục bản nháp về đúng trạng thái cũ (hoàn tác, phục hồi `applying`). */
@@ -67,6 +83,8 @@ export interface MigrationSnapshot {
   registered_ref: { template_id: mongoose.Types.ObjectId; version: number } | null
   /** Lần đổi mẫu đã áp dụng ngay trước lần này: nguồn của `migrated_base_spine` khi hoàn tác (snapshot không chứa bản sao Spine). */
   prior_anchor_migration_id: mongoose.Types.ObjectId | null
+  /** FLF-466: `Project.source_language` trước khi đổi (`null` = chưa đặt) — hoàn tác khôi phục đúng ngôn ngữ chữ trong Spine. */
+  source_language?: string | null
 }
 
 /** Bản dịch đã có của lần đổi mẫu (key đơn vị dịch ⇒ chữ dịch) — lưu để chạy lại không dịch (không trừ credit) lần hai. */
@@ -81,6 +99,8 @@ export interface ApplySteps {
   file: boolean
   spine: boolean
   profile: boolean
+  /** FLF-466: đã ghi DocVersion `system_change` (sau `profile`, trước `finalizeApplied`). Thiếu ở bản ghi cũ ⇒ coi như chưa. */
+  version?: boolean
 }
 
 export interface MigrationDecision {
@@ -122,10 +142,12 @@ export interface ITemplateMigration extends Document {
   /** Đã chạy bước dịch (D9): Spine của dự án được ghi chữ đã dịch; phát hành đọc để không tạo bản tracked. */
   translated: boolean
   translated_units: MigrationTranslatedUnit[]
+  /** Key các đơn vị dịch không ra chữ hợp lệ dù đã thử lại (chia nhỏ lô) — tài liệu giữ chữ gốc ở đúng các đơn vị này (FLF-471). */
+  untranslated_keys: string[]
   snapshot: MigrationSnapshot | null
   /** File nền mới đã lưu ở bước áp dụng (xoá khi trả về `ready` / hoàn tác). */
   new_base_file_ref: string | null
-  /** `cr_id` của CR nguồn `template_migration` mang các Change của lần này. */
+  /** Cũ (trước FLF-466): `cr_id` của CR giả `template_migration`. Không còn ghi; Change mới mang `by = system_change:<id>`. */
   spine_cr_id: string | null
   /** Phần profile mô tả file nền mới (heading_map, table_map, layout…) — dựng ở bước dựng file, `$set` ở bước cuối. */
   new_profile: Record<string, unknown> | null
@@ -172,6 +194,7 @@ const templateMigrationSchema = new Schema<ITemplateMigration>(
           doc_version: { type: String, default: null },
           language: { type: String, required: true },
           template_family: { type: String, default: null },
+          standard: { type: Boolean, default: false },
           headings: { type: [Schema.Types.Mixed], default: [] }
         },
         opts
@@ -181,7 +204,8 @@ const templateMigrationSchema = new Schema<ITemplateMigration>(
     to: {
       type: new Schema(
         {
-          template_id: { type: Schema.Types.ObjectId, ref: "OrgTemplate", required: true },
+          template_id: { type: Schema.Types.ObjectId, ref: "OrgTemplate", default: null },
+          standard: { type: Boolean, default: false },
           version: { type: Number, required: true },
           name: { type: String, default: "" },
           visibility: { type: String, enum: ["org", "project"], required: true },
@@ -213,6 +237,7 @@ const templateMigrationSchema = new Schema<ITemplateMigration>(
     resolved_items: { type: Schema.Types.Mixed, default: () => [] },
     translated: { type: Boolean, default: false },
     translated_units: { type: Schema.Types.Mixed, default: () => [] },
+    untranslated_keys: { type: [String], default: () => [] },
     snapshot: { type: Schema.Types.Mixed, default: null },
     new_base_file_ref: { type: String, default: null },
     new_profile: { type: Schema.Types.Mixed, default: null },

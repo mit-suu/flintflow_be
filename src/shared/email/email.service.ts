@@ -2,7 +2,7 @@ import crypto from "crypto"
 import nodemailer from "nodemailer"
 import { env } from "../../config/env.js"
 import { defineJob, enqueueJob } from "../queue/job-runner.js"
-import { getOtpEmailHtml, getOtpEmailText, type OtpPurpose, getInvitationEmailHtml, getInvitationEmailText } from "./templates.js"
+import { getOtpEmailHtml, getOtpEmailText, type OtpPurpose, getInvitationEmailHtml, getInvitationEmailText, getApprovalEmailHtml, getApprovalEmailText, type ApprovalEmailParams } from "./templates.js"
 
 let transporter: nodemailer.Transporter | null = null
 
@@ -170,3 +170,42 @@ const invitationEmailJob = defineJob<{ toEmail: string; input: OrgInvitationEmai
  */
 export const sendOrgInvitationEmail = (toEmail: string, input: OrgInvitationEmailInput): Promise<void> =>
   enqueueJob(invitationEmailJob, { toEmail, input })
+
+export type ApprovalEmailInput = ApprovalEmailParams
+
+/** UC-89: gửi thật email việc duyệt. SMTP lỗi ⇒ ném để queue retry; chưa cấu hình ⇒ in console. */
+export const deliverApprovalEmail = async (toEmail: string, input: ApprovalEmailInput): Promise<void> => {
+  const activeTransporter = getTransporter()
+  if (!activeTransporter) {
+    printApprovalSimulation(toEmail, input)
+    return
+  }
+  const sender = getSender()
+  await activeTransporter.sendMail({
+    from: sender,
+    to: toEmail,
+    subject: input.title,
+    text: getApprovalEmailText(input),
+    html: getApprovalEmailHtml(input),
+    ...buildPersonalHeaders(sender)
+  })
+  console.log(`[EMAIL SERVICE] approval email sent to ${toEmail}`)
+}
+
+const printApprovalSimulation = (toEmail: string, input: ApprovalEmailInput): void =>
+  printSimulation(`approval email for ${toEmail}`, [input.title, input.url])
+
+const approvalEmailJob = defineJob<{ toEmail: string; input: ApprovalEmailInput }>({
+  queue: "email",
+  name: "approval",
+  options: { attempts: 5, backoff: { type: "exponential", delay: 30_000 }, removeOnComplete: true },
+  process: (d) => deliverApprovalEmail(d.toEmail, d.input),
+  onFinalFailure: async (d, error) => {
+    console.error(`[EMAIL SERVICE ERROR] Failed to send approval email to ${d.toEmail}:`, error)
+    printApprovalSimulation(d.toEmail, d.input)
+  }
+})
+
+/** Đưa email việc duyệt vào hàng đợi (không chờ gửi); queue tự gửi lại khi SMTP lỗi. */
+export const sendApprovalEmail = (toEmail: string, input: ApprovalEmailInput): Promise<void> =>
+  enqueueJob(approvalEmailJob, { toEmail, input })

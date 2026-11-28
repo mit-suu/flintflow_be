@@ -21,4 +21,9 @@ router.post("/:orgId/templates/:templateId/versions", ...inOrg, lead, controller
 router.get("/:orgId/templates/:templateId/versions/:version", ...inOrg, controller.getTemplateVersion)
 router.post("/:orgId/templates/:templateId/versions/:version/publish", ...inOrg, lead, controller.publishTemplateVersion)
 router.delete("/:orgId/templates/:templateId/versions/:version", ...inOrg, lead, controller.deleteTemplateVersion)
+// UC-88: Lead duyệt đề xuất mẫu Analyst gửi từ dự án
+router.get("/:orgId/template-proposals", ...inOrg, lead, controller.listTemplateProposals)
+router.get("/:orgId/template-proposals/:proposalId", ...inOrg, lead, controller.getOrgTemplateProposal)
+router.post("/:orgId/template-proposals/:proposalId/approve", ...inOrg, lead, controller.approveTemplateProposal)
+router.post("/:orgId/template-proposals/:proposalId/reject", ...inOrg, lead, controller.rejectTemplateProposal)
 export default router

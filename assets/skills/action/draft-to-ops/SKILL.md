@@ -1,7 +1,7 @@
 ---
 skill_id: draft-to-ops
 kind: action
-version: 1.4.0
+version: 1.6.0
 description: Turn the user's answers into ONE Spine op transaction - validated by schema, invariants checked at end of batch
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -27,7 +27,7 @@ You convert the conversation for one step into **a single transaction of operati
 - Step: **{{step_id}}** - {{step_name}}
 - Call kind: **{{call_kind}}** (`draft` | `regenerate` | `revision` | `glossary_scan`)
 - Fields this step may write: {{writable_paths}}
-- Projection (current values, keyed): {{projection}}
+- Projection (current values, keyed): {{projection}} - `fix_comments` (when present): reviewer comments on this step's sections that this redraft must resolve; change the content they point at
 - Addendum for this step: {{addendum}}
 - User answers for this step: {{answers}}
 - Revision request (only for `revision`): {{revision_request}}
@@ -73,7 +73,7 @@ You convert the conversation for one step into **a single transaction of operati
     A batch that restates an assumption but does not write its `path` is rejected. That `path` may lie outside `writable_paths` - allowed for any
     open assumption of the step the gate belongs to. `status` is narrower: only the assumptions the gate message itself stated may change `status`, and
     only the one the user just settled in this request. An assumption the gate never stated is one the user has not read, so their revision says nothing
-    about it - it stays `unconfirmed` until a gate states it.
+    about it - it stays `unconfirmed` until a gate states it. **Out of scope:** when part of the request names something this step may not write (a value that lives in another section - a payment provider in `actors`, a feature dropped from `release_scope` while this step writes only `screens`), do not touch it and never promise to update it: return `"out_of_scope": "<that part, one short English phrase>"` beside `ops` (`revision` only). The server then opens the document editor with the user's sentence and says so itself; `notes` covers only what this step did (nothing changed here ⇒ say so). Never write "sẽ cập nhật" / "I will update" for work this step cannot do.
 13. **Batch size**: at S-5, at most 6 functions per call.
 14. `reason` is a short log line (it feeds §I Record of Changes): *why*, not *what*.
 15. **`notes` is the message the user reads at the gate**, in the reply language, in a friendly BA voice. It follows the
@@ -85,7 +85,7 @@ You convert the conversation for one step into **a single transaction of operati
     when the user accepts, so an assumption you leave out stays open and comes back later. More than 2 of them ⇒ say the
     **two that matter** and stop - never a list of "Tôi tạm hiểu là …" sentences, and **never count the rest** ("Còn 3
     điều…"): the gate adds that line itself from the real number, so your own count would contradict it. On a `revision`,
-    confirm in words what changed. Empty `ops` ⇒ say why.
+    confirm in words what changed. Empty `ops` ⇒ say why. Count scope in "use case", never "chức năng" / "function". **Never print an internal id** (`OR01`, `N02`, `S05`, `A03`, `AD07`, `FN009`) or a field name (`feature_ids`); name the thing by its name or say how many. When the reply language is Vietnamese, do not paste English statements into the sentence: count them ("thêm 3 ràng buộc") or paraphrase in Vietnamese.{{#if mid_phase_run}} **Mid-phase run:** the next step starts by itself - never invite or name it; say what this step did and stop.{{/if}}
 {{#if has_documents}}
 16. **Sources.** The content guidance ends with the customer's uploaded documents, one paragraph per line, each starting
     with its code (`[D1-P03]`). For every element you add or change **from what a document says**, add an entry to

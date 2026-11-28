@@ -22,8 +22,10 @@ import {
   groupIdSchema,
   listChangeRequestsQuerySchema,
   locationIdSchema,
+  diagramPreviewQuerySchema,
   materialParamsSchema,
   ownerStepDraftRequestSchema,
+  revertRequestSchema,
   patchLocationRequestSchema,
   approveExtractionSchema,
   extractionParamsSchema,
@@ -38,9 +40,14 @@ import { handleCrMessage } from "./cr-message.service.js"
 import { runImpact } from "./cr-impact.service.js"
 import { decideGroup } from "./decision.service.js"
 import { patchLocation } from "./location.service.js"
+import { crDocumentDiff } from "./cr-document-diff.service.js"
+import { diagramPreview } from "./diagram-preview.service.js"
+import type { OriginalDiagramKind } from "../spine/spine.types.js"
 import { addMaterial, removeMaterial } from "./material.service.js"
 import { draftInOwnerStep, runPropose } from "./propose.service.js"
 import { runVerify } from "./verify.service.js"
+import { createRevertCr } from "./revert-cr.service.js"
+import { assertPackageNotPending } from "../doc-version/review-package.service.js"
 import { assertConvertible, markConverted } from "../comment/comment.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -60,6 +67,8 @@ const loadCr = async (req: Request): Promise<{ auth: Mode1Auth; cr: IChangeReque
 const loadOwnCr = async (req: Request): Promise<{ auth: Mode1Auth; cr: IChangeRequest }> => {
   const loaded = await loadCr(req)
   await crService.assertRequester(loaded.cr, loaded.auth.userId)
+  // C-7: gói chờ Lead ⇒ bản nháp khoá; nội dung CR soạn lúc này sẽ vào gói nên mọi bước C-1…C-6 cũng dừng (business-flow §2)
+  assertPackageNotPending((await spineRepository.get(loaded.auth.projectId))?.baseline_submission)
   return loaded
 }
 
@@ -89,13 +98,35 @@ const toExtractionDto = (e: IRequirementExtraction): ExtractionDto => ({
     quote: i.quote,
     group: i.group,
     entity_paths: [...i.entity_paths],
+    entity_names: i.entity_paths.map((_, n) => i.entity_names?.[n] ?? ""),
+    speaker: i.speaker ?? null,
+    sides: (i.sides ?? []).map((side) => ({ speaker: side.speaker ?? null, para_id: side.para_id ?? null, quote: side.quote })),
+    inference: i.inference
+      ? {
+          symptom: i.inference.symptom,
+          symptom_quote: i.inference.symptom_quote,
+          symptom_para_id: i.inference.symptom_para_id ?? null,
+          root_cause: i.inference.root_cause ?? "",
+          rationale: i.inference.rationale ?? "",
+          options: i.inference.options.map((o) => ({ label: o.label, description: o.description ?? null, pros: [...o.pros], cons: [...o.cons], risks: [...o.risks] })),
+          recommended: i.inference.recommended ?? null,
+          recommendation_reason: i.inference.recommendation_reason ?? null,
+          serves_goal: i.inference.serves_goal ?? null
+        }
+      : null,
     question: i.question ?? null,
     suggested_answers: [...i.suggested_answers],
     include: i.include ?? null,
     drop_reason: i.drop_reason ?? null,
     answer: i.answer ?? null,
+    chosen_option: i.chosen_option ?? null,
     cr_id: i.cr_id ?? null
   })),
+  situation: {
+    current: (e.situation?.current ?? []).map((p) => ({ text: p.text, para_id: p.para_id ?? null, quote: p.quote })),
+    desired: (e.situation?.desired ?? []).map((p) => ({ text: p.text, para_id: p.para_id ?? null, quote: p.quote }))
+  },
+  batches: e.batches ?? 1,
   credits: e.credits,
   approved_at: e.approved_at ? e.approved_at.toISOString() : null,
   created_at: e.createdAt.toISOString(),
@@ -107,6 +138,13 @@ export const extractRequirements = mode1Handler(async (req, res) => {
   const { documentId } = parseInput(extractionParamsSchema, req.params)
   const extraction = await extractionService.extractRequirements(auth.projectId, auth.userId, documentId)
   return sendSuccess(res, 201, toExtractionDto(extraction))
+})
+
+/** FLF-449: số lô + credit dự kiến của lượt rút (tài liệu dài chia lô, mỗi lô một lượt). */
+export const estimateExtraction = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const { documentId } = parseInput(extractionParamsSchema, req.params)
+  return sendSuccess(res, 200, await extractionService.estimateExtraction(auth.projectId, documentId))
 })
 
 export const getExtraction = mode1Handler(async (req, res) => {
@@ -139,10 +177,20 @@ export const createCr = mode1Handler(async (req, res) => {
     }
     await assertConvertible(auth.projectId, body.comment_id)
   }
-  const cr = await crService.createCr(auth.projectId, auth.userId, body)
+  // BF §3.2 C-1: mỗi người một CR mở một lúc (kiểm sau gói chờ duyệt / baseline, trong createCr)
+  const cr = await crService.createCr(auth.projectId, auth.userId, body, { enforceOwnOpen: true })
   if (body.comment_id) await markConverted(auth.projectId, body.comment_id, cr.cr_id, auth.userId, requireOrgId(req))
   // Bản xem trước hết hạn / không phải của mình ⇒ CR vẫn tạo (3.1 không phụ thuộc bản xem trước), báo để FE nói rõ
   if (body.preview_id && !cr.seed) return sendSuccess(res, 201, await crService.toDetail(cr), { seed_dropped: true })
+  return detail(res, cr, 201)
+})
+
+/** BF §3.2: "hoàn tác CR-xxx" = CR mới dựng từ `before` của các Change của CR đã ghi, rồi chạy kiểm như CR thường. */
+export const revertCr = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const { crId } = parseInput(crParamsSchema, req.params)
+  const body = parseInput(revertRequestSchema, req.body)
+  const cr = await createRevertCr(auth.projectId, auth.userId, crId, body.requester)
   return detail(res, cr, 201)
 })
 
@@ -251,11 +299,30 @@ export const listPendingSections = mode1Handler(async (req, res) => {
 export const revise = action((cr) => crService.reviseCr(cr), { ownerOnly: false })
 
 export const updateLocation = mode1Handler(async (req, res) => {
-  const { cr } = await loadOwnCr(req)
+  const { auth, cr } = await loadOwnCr(req)
   const locId = parseInput(locationIdSchema, req.params.locId)
   const body = parseInput(patchLocationRequestSchema, req.body)
-  await patchLocation(cr, locId, body)
+  await patchLocation(cr, locId, body, auth.userId)
   return detail(res, cr)
+})
+
+/** §4.13: ảnh của vị trí sơ đồ gốc — sơ đồ FlintFlow vẽ từ dữ liệu sau CR, hoặc ảnh gốc của file (`variant=original`). Không ghi gì, không gọi AI. Ai xem được CR thì xem được. */
+export const locationDiagramPreview = mode1Handler(async (req, res) => {
+  const { cr } = await loadCr(req)
+  const locId = parseInput(locationIdSchema, req.params.locId)
+  const query = parseInput(diagramPreviewQuerySchema, req.query)
+  const preview = await diagramPreview(cr, locId, query.kind as OriginalDiagramKind, query.owner ?? null, { part: query.part, variant: query.variant })
+  res.setHeader("Content-Type", preview.mime)
+  res.setHeader("Cache-Control", "private, no-store")
+  res.setHeader("X-Diagram-Parts", String(preview.parts))
+  res.setHeader("Access-Control-Expose-Headers", "X-Diagram-Parts")
+  return res.status(200).send(preview.image)
+})
+
+/** FLF-495 (#23b): đề xuất của CR tô lên tài liệu — dựng khô hai bản (hiện tại / sau CR), không ghi, không gọi AI. Ai xem được CR thì xem được. */
+export const documentDiff = mode1Handler(async (req, res) => {
+  const { cr } = await loadCr(req)
+  return sendSuccess(res, 200, await crDocumentDiff(cr))
 })
 
 /** BPMN 3.9 (mode 1 v3): sửa đề xuất một vị trí bằng skill của step sở hữu, theo hướng của BA — chỉ ghi đề xuất. */

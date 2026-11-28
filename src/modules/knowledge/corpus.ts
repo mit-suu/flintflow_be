@@ -26,6 +26,15 @@ export interface LoadCorpusOptions {
   layout?: "skills" | "generic"
 }
 
+/**
+ * FLF-465 (business-flow nguyên tắc 9, UC-79): kho điều khoản ISO/IEC/IEEE 29148 cho chế độ hỏi tri thức. Mỗi file
+ * một điều khoản, tóm tắt bằng lời của FlintFlow (không chép nguyên văn chuẩn); frontmatter `section` mang số điều
+ * khoản để câu trả lời trích được. Nạp bằng `npm run ingest:knowledge -- --dir assets/knowledge/iso-29148`
+ * (tên corpus mặc định = tên thư mục).
+ */
+export const ISO_29148_CORPUS = "iso-29148"
+export const ISO_29148_CORPUS_DIR = "assets/knowledge/iso-29148"
+
 const SOURCE_KINDS: readonly KnowledgeSourceKind[] = ["internal_skill", "standard"]
 const STATUSES: readonly KnowledgeStatus[] = ["placeholder", "verified"]
 

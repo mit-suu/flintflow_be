@@ -9,6 +9,7 @@ import { planTransaction } from "../spine/op-engine.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import { collectEntities, realSectionId, resolveProvisional } from "./extracted-entities.js"
 import type { ExtractedField } from "./extraction-draft.model.js"
+import { contentFindingsHome, needsReviewFindings, titleContentFindings } from "./finalize.service.js"
 import { needsConfirm } from "./import.constants.js"
 import { buildImportOps } from "./spine-builder.js"
 
@@ -125,8 +126,7 @@ describe("finalize - field ⇒ thực thể ⇒ op", () => {
 })
 
 describe("FLF-343 needsReviewFindings - chỗ độ tin thấp vào baseline kèm cờ Cần xem", () => {
-  it("field chưa xác nhận cần xem (độ tin < 0.7 / ảnh) + heading / cột tự nhận ⇒ mỗi chỗ một phát hiện, target = đường dẫn / block", async () => {
-    const { needsReviewFindings } = await import("./finalize.service.js")
+  it("field chưa xác nhận cần xem (độ tin < 0.7 / ảnh) + heading / cột tự nhận ⇒ mỗi chỗ một phát hiện, target = đường dẫn / block", () => {
     const drafts = [
       {
         section_id: "fixed:2.1",
@@ -166,8 +166,7 @@ describe("FLF-343 needsReviewFindings - chỗ độ tin thấp vào baseline kè
 })
 
 describe("FLF-411 (U2-1) needsReviewFindings - đọc từ ảnh sơ đồ: một cờ mỗi ảnh, nêu tên phần tử", () => {
-  it("nhiều field của nhiều actor trên một ảnh ⇒ một cờ; hai ảnh cùng mục ⇒ hai cờ đánh số; không mã nội bộ, không khoá thô", async () => {
-    const { needsReviewFindings } = await import("./finalize.service.js")
+  it("nhiều field của nhiều actor trên một ảnh ⇒ một cờ; hai ảnh cùng mục ⇒ hai cờ đánh số; không mã nội bộ, không khoá thô", () => {
     const vision = (path: string, value: unknown, block: string) => field(path, value, 0.7, false, { origin: "vision", source_block_ids: [block] })
     const drafts = [
       {
@@ -202,8 +201,7 @@ describe("FLF-411 (U2-1) needsReviewFindings - đọc từ ảnh sơ đồ: mộ
 })
 
 describe("FLF-411 (U2-5) needsReviewFindings - đọc bằng chữ: một cờ mỗi phần tử, nêu tên và các trường", () => {
-  it("nhiều field độ tin thấp của một phần tử ⇒ một cờ; không tên ⇒ trích câu; không mã nội bộ / khoá thô", async () => {
-    const { needsReviewFindings } = await import("./finalize.service.js")
+  it("nhiều field độ tin thấp của một phần tử ⇒ một cờ; không tên ⇒ trích câu; không mã nội bộ / khoá thô", () => {
     const drafts = [
       {
         section_id: "fixed:5.4",
@@ -236,8 +234,7 @@ describe("FLF-411 (U2-5) needsReviewFindings - đọc bằng chữ: một cờ m
     for (const f of out) expect(f.message).not.toMatch(/OR-02|FR-3|\[id=|category|trigger/)
   })
 
-  it("FLF-429: field thông tin dự án (`project.*`) độ tin thấp ⇒ một cờ, không ném lỗi (spine.project là object)", async () => {
-    const { needsReviewFindings } = await import("./finalize.service.js")
+  it("FLF-429: field thông tin dự án (`project.*`) độ tin thấp ⇒ một cờ, không ném lỗi (spine.project là object)", () => {
     const drafts = [
       {
         section_id: "fixed:1.1",
@@ -253,8 +250,7 @@ describe("FLF-411 (U2-5) needsReviewFindings - đọc bằng chữ: một cờ m
 })
 
 describe("FLF-361 needsReviewFindings - không hỏi lại chỗ không vào Spine / không còn là đoán", () => {
-  it("UC → actor chỉ có trên ảnh đã bỏ (\"User\") ⇒ không cờ; tham chiếu vào được ⇒ có cờ; cấp BR ở 5.1 ⇒ không cờ; mã khác dạng vẫn khớp", async () => {
-    const { needsReviewFindings } = await import("./finalize.service.js")
+  it("UC → actor chỉ có trên ảnh đã bỏ (\"User\") ⇒ không cờ; tham chiếu vào được ⇒ có cờ; cấp BR ở 5.1 ⇒ không cờ; mã khác dạng vẫn khớp", () => {
     const drafts = [
       { section_id: "fixed:2.2.1", fields: [field("use_cases[id=UC10].actor_ids", ["A08"], 0.7, false, { origin: "vision" }), field("use_cases[id=UC-11].actor_ids", ["A01", "A08"], 0.7, false, { origin: "vision" })] },
       { section_id: "fixed:5.1", fields: [field("business_rules[id=BR-01].tier", "high", 0.69)] }
@@ -276,8 +272,7 @@ describe("FLF-361 needsReviewFindings - không hỏi lại chỗ không vào Spi
 })
 
 describe("FLF-363 titleContentFindings - tiêu đề và nội dung khác nhau", () => {
-  it("heading đổi mục theo nội dung ⇒ cờ nêu cả hai mục theo tên mẫu, không mã nội bộ; không thêm cờ Cần xem cho heading đó", async () => {
-    const { needsReviewFindings, titleContentFindings } = await import("./finalize.service.js")
+  it("heading đổi mục theo nội dung ⇒ cờ nêu cả hai mục theo tên mẫu, không mã nội bộ; không thêm cờ Cần xem cho heading đó", () => {
     const heading_map = [
       {
         block_id: "B0002",
@@ -303,8 +298,7 @@ describe("FLF-363 titleContentFindings - tiêu đề và nội dung khác nhau",
 })
 
 describe("FLF-343 needsReviewFindings - trùng đường dẫn, phần tử bị bỏ", () => {
-  it("cùng field ở hai section ⇒ một cờ; phần tử buildImportOps không đưa vào Spine ⇒ không cờ", async () => {
-    const { needsReviewFindings } = await import("./finalize.service.js")
+  it("cùng field ở hai section ⇒ một cờ; phần tử buildImportOps không đưa vào Spine ⇒ không cờ", () => {
     const drafts = [
       { section_id: "fixed:2.1", fields: [field("actors[id=A01].kind", "human", 0.6), field("actors[id=A09].kind", "human", 0.6)] },
       { section_id: "fixed:2.2.1", fields: [field("actors[id=A01].kind", "human", 0.5)] }
@@ -312,5 +306,23 @@ describe("FLF-343 needsReviewFindings - trùng đường dẫn, phần tử bị
     const spine = { ...createEmptySpine(), actors: [{ id: "A01" }] } as unknown as Parameters<typeof needsReviewFindings>[0]
     const out = needsReviewFindings(spine, drafts, { heading_map: [], table_map: [] }, [], new Map(), () => null)
     expect(out.map((f) => f.target_id)).toEqual(["actors[id=A01]"])
+  })
+})
+
+describe("FLF-444 contentFindingsHome - cờ của mục đọc theo nội dung về đúng mục Spine", () => {
+  const spine = { ...createEmptySpine(), functions: [{ id: "FR-01", name: "Đăng nhập" }] } as unknown as Parameters<typeof contentFindingsHome>[0]
+  const finding = (section_id: string, target_id: string | null) => ({ rule: "x", section_id, message: "Cần xem: m", block_ids: ["B0001"], target_id })
+
+  it("content:@B0001 + target functions[id=FR-01].name ⇒ section_id = function:FR-01, không rơi về fixed:I hay content:@B…", () => {
+    const [out] = contentFindingsHome(spine, [finding("content:@B0001", "functions[id=FR-01].name")])
+    expect(out.section_id).toBe("function:FR-01")
+    expect(out.section_id).not.toBe("fixed:I")
+    expect(out.section_id).not.toMatch(/^content:@/)
+    expect(out.target_id).toBe("functions[id=FR-01].name")
+  })
+
+  it("mục thường, hoặc không có target_id, hoặc target không phải đường dẫn ⇒ giữ nguyên", () => {
+    const keep = [finding("fixed:2.1", "functions[id=FR-01].name"), finding("content:@B0002", null), finding("content:@B0003", "!!không phải đường dẫn")]
+    expect(contentFindingsHome(spine, keep).map((f) => f.section_id)).toEqual(["fixed:2.1", "content:@B0002", "content:@B0003"])
   })
 })

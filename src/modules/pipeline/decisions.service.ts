@@ -20,6 +20,7 @@ import { allocateId } from "../spine/id-allocator.js"
 import type { Decision, Spine } from "../spine/spine.types.js"
 import type { Op } from "../spine/op.types.js"
 import type { QuestionOption } from "../../shared/ai/response-parser.js"
+import { RECOMMENDED_SUFFIX } from "../../shared/ai/option-analysis.js"
 
 /**
  * Khoá chủ đề chuẩn hoá. Model được dùng khoá tự do, nhưng mọi khoá quen thuộc phải rơi về đúng một tên —
@@ -101,6 +102,8 @@ export interface AskedQuestion {
   topic_key?: string
   /** Model khẳng định chủ đề này cần hỏi lại (dữ liệu mới mâu thuẫn) — kèm lý do trong `conflict`. */
   conflict?: string
+  /** FLF-449: lý do khuyến nghị — đi tiếp nguyên vẹn qua bộ lọc sổ quyết định. */
+  recommendation_reason?: string
 }
 
 export interface FilteredQuestions {
@@ -140,6 +143,41 @@ export const similarQuestion = (a: string | null | undefined, b: string | null |
   return shared / (wa.size + wb.size - shared) >= SAME_QUESTION_OVERLAP
 }
 
+/** Nhãn lựa chọn / đáp án đã chốt về cùng một dạng để so (bỏ đuôi khuyến nghị, hoa/thường, khoảng trắng). */
+const comparableAnswer = (text: string): string => text.replace(RECOMMENDED_SUFFIX, "").replace(/\s+/g, " ").trim().toLowerCase()
+
+/** Số từ khoá chung và tỉ lệ trùng (Jaccard) của hai câu hỏi. */
+export const questionOverlap = (a: string, b: string): { shared: number; ratio: number } => {
+  const wa = questionWords(a)
+  const wb = questionWords(b)
+  let shared = 0
+  for (const w of wa) if (wb.has(w)) shared++
+  const union = wa.size + wb.size - shared
+  return { shared, ratio: union === 0 ? 0 : shared / union }
+}
+
+/**
+ * FLF-472 (phần E): câu mới có MỘT LỰA CHỌN trùng đúng đáp án của một quyết định còn hiệu lực, và câu hỏi chung ý với câu của
+ * quyết định ⇒ hỏi lại cùng một điều bằng chữ khác ("Đơn hoàn tất tính khi nào?" / "Khi nào coi là giao dịch thành công?").
+ * Đáp án dài (≥ 3 từ) trùng cả câu chữ nên đã đủ đặc trưng: chỉ cần ≥ 2 từ khoá chung và tỉ lệ ≥ 0.15; đáp án ngắn ("Có",
+ * "Web") trùng ngẫu nhiên nhiều nên giữ ngưỡng chặt 0.35. Tín hiệu tất định — so theo nghĩa (embedding) để FLF-449 việc 13.
+ */
+export const ECHO_OVERLAP_LONG_ANSWER = 0.15
+export const ECHO_OVERLAP_SHORT_ANSWER = 0.35
+
+const echoesDecidedAnswer = (question: AskedQuestion, decided: ReadonlyMap<string, Decision>): Decision | undefined => {
+  if (!question.options?.length) return undefined
+  const labels = new Set(question.options.map((o) => comparableAnswer(o.label)))
+  return [...decided.values()].find((d) => {
+    if (!d.question) return false
+    const answer = comparableAnswer(d.answer)
+    if (answer === "" || !labels.has(answer)) return false
+    const { shared, ratio } = questionOverlap(question.question, d.question)
+    const longAnswer = answer.split(" ").length >= 3
+    return longAnswer ? shared >= 2 && ratio >= ECHO_OVERLAP_LONG_ANSWER : ratio >= ECHO_OVERLAP_SHORT_ANSWER
+  })
+}
+
 export const filterAskedQuestions = (spine: Pick<Spine, "decisions">, questions: readonly AskedQuestion[]): FilteredQuestions => {
   const decided = activeDecisions(spine)
   const out: FilteredQuestions = { questions: [], dropped: [] }
@@ -148,7 +186,10 @@ export const filterAskedQuestions = (spine: Pick<Spine, "decisions">, questions:
   for (const question of questions) {
     const topic = normalizeTopicKey(question.topic_key, question.question)
     // P05: model đặt key mới cho cùng một câu đã chốt ⇒ so nội dung câu hỏi với câu của quyết định
-    const previous = decided.get(topic) ?? [...decided.values()].find((d) => similarQuestion(question.question, d.question))
+    const previous =
+      decided.get(topic) ??
+      [...decided.values()].find((d) => similarQuestion(question.question, d.question)) ??
+      echoesDecidedAnswer(question, decided)
     if (previous && !question.conflict) {
       out.dropped.push({ topic_key: topic, question: question.question, answer: previous.answer })
       continue
@@ -168,6 +209,8 @@ export interface AnsweredTopic {
   topic_key: string
   question: string
   answer: string
+  /** FLF-472: đính chính qua chat (thay quyết định đã chốt), không phải trả lời câu đang chờ — chỉ khác lý do ghi sổ. */
+  correction?: boolean
 }
 
 /**
@@ -200,7 +243,12 @@ export const decisionOps = (spine: Spine, stepId: string, answered: readonly Ans
       at,
       superseded_by: null
     }
-    ops.push({ op: "add", path: "decisions[]", value: decision, reason: `Chốt ${item.topic_key} ở ${stepId}` })
+    ops.push({
+      op: "add",
+      path: "decisions[]",
+      value: decision,
+      reason: item.correction ? `Đính chính ${item.topic_key} qua chat` : `Chốt ${item.topic_key} ở ${stepId}`
+    })
     working.decisions = [...working.decisions, decision]
   }
   return ops
@@ -217,11 +265,20 @@ export const SYSTEM_NAME_STEP = "B-2.3"
  * Field trống mà step này được phép hỏi. `project.system_name` chỉ được hỏi ở B-2.3: các step khác đọc nó (B-1.x, S-1…) cũng
  * thấy nó trống nhưng hỏi ở đó là hỏi tên trước khi Brief đủ để gợi ý — và đúng điều FLF-232 bỏ khỏi câu đầu.
  */
-export const askableFields = (templateId: string, fields: readonly string[]): string[] =>
-  templateId === SYSTEM_NAME_STEP ? [...fields] : fields.filter((field) => field !== SYSTEM_NAME_FIELD)
+export const askableFields = (templateId: string, fields: readonly string[]): string[] => {
+  // FLF-449: trường sổ sách của hệ thống (`progress.*`, `steps.*`, `sections.*`, `flags.*`) trống là bình thường, không phải
+  // điều người dùng chưa kể — để lọt vào "còn thiếu" thì model bịa câu hỏi ("có cần ghi nhận nguồn (credit) không?")
+  const userFields = fields.filter((field) => !BOOKKEEPING_FIELD.test(field))
+  return templateId === SYSTEM_NAME_STEP ? userFields : userFields.filter((field) => field !== SYSTEM_NAME_FIELD)
+}
 
-/** Đuôi đánh dấu phương án khuyến nghị trên nhãn lựa chọn (FLF-220). */
-export const RECOMMENDED_SUFFIX = /\s*\((khuyến nghị|recommended)\)\s*$/i
+const BOOKKEEPING_FIELD = /^(progress|steps|sections|flags)(\.|\[|$)/
+
+/**
+ * Đuôi đánh dấu phương án khuyến nghị trên nhãn lựa chọn (FLF-220). FLF-449: định nghĩa chuyển sang `option-analysis.ts`
+ * (kiểu phương án dùng chung); đuôi vẫn giữ song song với cờ `recommended` để đọc run-state cũ và các script đo.
+ */
+export { RECOMMENDED_SUFFIX }
 
 /** Đuôi rỗng nghĩa trong tên hệ thống — "Minh An Clinic Appointment System" chỉ dài thêm, không rõ thêm. */
 const FILLER_NAME_SUFFIX = /\s+(system|app|application|platform|software|solution|tool|portal)$/i
@@ -238,5 +295,11 @@ export const sanitizeSuggestions = <T extends { label: string }>(topicKey: strin
 }
 
 /** Sổ đưa vào prompt: gọn, chỉ điều còn hiệu lực — "đã chốt gì, ở bước nào". */
-export const ledgerForPrompt = (spine: Pick<Spine, "decisions">): { topic_key: string; answer: string; step_id: string }[] =>
-  [...activeDecisions(spine).values()].map(({ topic_key, answer, step_id }) => ({ topic_key, answer, step_id }))
+export const ledgerForPrompt = (spine: Pick<Spine, "decisions">): { topic_key: string; question?: string; answer: string; step_id: string }[] =>
+  // FLF-472: kèm câu hỏi gốc (rút gọn) để model nhận ra chủ đề đã chốt dù nó đặt `topic_key` khác
+  [...activeDecisions(spine).values()].map(({ topic_key, question, answer, step_id }) => ({
+    topic_key,
+    ...(question ? { question: question.length > 160 ? `${question.slice(0, 157)}...` : question } : {}),
+    answer,
+    step_id
+  }))

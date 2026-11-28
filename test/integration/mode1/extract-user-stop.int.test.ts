@@ -8,8 +8,8 @@ vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await imp
 
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeMode1 } from "../../helpers/mode1.js"
-import { importAtExtracting } from "../../helpers/mode1-import-p4.js"
-import { AI_BLOCK_CHARS, runExtraction } from "../../../src/modules/import/extract.service.js"
+import { importAtExtracting, runExtraction } from "../../helpers/mode1-import-p4.js"
+import { AI_BLOCK_CHARS } from "../../../src/modules/import/extract.service.js"
 import { requestStop } from "../../../src/modules/import/extract-jobs.js"
 import { ExtractionDraft } from "../../../src/modules/import/extraction-draft.model.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"

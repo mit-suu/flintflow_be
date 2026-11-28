@@ -13,7 +13,6 @@ import { CreditWallet } from "../../src/modules/credits/credit-wallet.model.js"
 import { User } from "../../src/modules/user/user.model.js"
 import { Membership } from "../../src/modules/organization/membership.model.js"
 import { GooglePendingAction } from "../../src/modules/google/docs-agent/pending-action.model.js"
-import { GoogleDocLink } from "../../src/modules/google/google-doc-link.model.js"
 import { loadSampleDoc } from "../../src/modules/google/docs-mcp/docs-test-fixture.js"
 import { authAs, parseSse, seedFixture, type SeededFixture } from "../setup.js"
 
@@ -76,21 +75,6 @@ const connectGoogle = async (seeded: SeededFixture) => {
   expect((await request(app).post("/api/v1/integrations/google/connect").set(auth(seeded.token)).send({ code: "c" })).status).toBe(200)
 }
 
-/** Trợ lý chỉ nhận Google Doc của dự án ⇒ mọi kịch bản liên kết `doc-srs-1` vào dự án trước. */
-const seedProject = async () => {
-  const seeded = await seedFixture("minimal")
-  await GoogleDocLink.create({
-    projectId: seeded.projectId,
-    userId: seeded.userId,
-    kind: "linked",
-    fileId: "doc-srs-1",
-    title: "SRS",
-    webViewLink: "https://docs.google.com/document/d/doc-srs-1/edit",
-    exportedAt: new Date()
-  })
-  return seeded
-}
-
 const send = (seeded: SeededFixture, body: Record<string, unknown>, token = seeded.token) =>
   request(app)
     .post(`${base(seeded)}/messages/stream`)
@@ -113,13 +97,14 @@ beforeEach(() => {
   env.GOOGLE_CLIENT_ID = "test-client.apps.googleusercontent.com"
   env.GOOGLE_CLIENT_SECRET = "test-client-secret"
   env.GOOGLE_TOKEN_ENC_KEY = crypto.randomBytes(32).toString("base64")
+  env.GOOGLE_DOCS_AGENT_ENABLED = true
   h.getAccessToken.mockResolvedValue({ token: "access" })
   h.documents.get.mockResolvedValue({ data: loadSampleDoc() })
 })
 
 describe("trợ lý Google Docs", () => {
   it("đọc qua tool, tool ghi chỉ thành đề xuất (kể cả khi model đòi dryRun: false); trừ 2 credit; Áp dụng mới ghi", async () => {
-    const seeded = await seedProject()
+    const seeded = await seedFixture("minimal")
     await connectGoogle(seeded)
     const before = await balance(seeded)
     h.steps.push(
@@ -165,7 +150,7 @@ describe("trợ lý Google Docs", () => {
   })
 
   it("tài liệu đổi sau khi xem trước ⇒ Áp dụng trả 409 GOOGLE_DOC_CHANGED, đề xuất còn để bỏ qua", async () => {
-    const seeded = await seedProject()
+    const seeded = await seedFixture("minimal")
     await connectGoogle(seeded)
     h.steps.push(toolStep([["insert_text", { afterHeading: "Business Rules", text: "BR02: Hoàn vé trước 24 giờ." }]]), textStep("Đã đề xuất."))
     const events = parseSse((await send(seeded, { message: "Thêm luật hoàn vé" })).body as string)
@@ -183,7 +168,7 @@ describe("trợ lý Google Docs", () => {
   })
 
   it("đề xuất của người khác / id rác ⇒ 404; Viewer ⇒ 403", async () => {
-    const seeded = await seedProject()
+    const seeded = await seedFixture("minimal")
     await connectGoogle(seeded)
     h.steps.push(toolStep([["insert_text", { atEnd: true, text: "Phụ lục B" }]]), textStep("ok"))
     const events = parseSse((await send(seeded, { message: "Thêm phụ lục" })).body as string)
@@ -202,8 +187,18 @@ describe("trợ lý Google Docs", () => {
     expect(res.status).toBe(403)
   })
 
+  it("cờ GOOGLE_DOCS_AGENT_ENABLED tắt ⇒ 503 GOOGLE_DOCS_AGENT_DISABLED, không trừ credit", async () => {
+    const seeded = await seedFixture("minimal")
+    const before = await balance(seeded)
+    env.GOOGLE_DOCS_AGENT_ENABLED = false
+    const res = await send(seeded, { message: "Đọc mục 2" })
+    expect(res.status).toBe(503)
+    expect(JSON.parse(res.body as string).error.code).toBe("GOOGLE_DOCS_AGENT_DISABLED")
+    expect(await balance(seeded)).toBe(before)
+  })
+
   it("chưa nối Google ⇒ 401 JSON trước khi mở luồng, không trừ credit", async () => {
-    const seeded = await seedProject()
+    const seeded = await seedFixture("minimal")
     const before = await balance(seeded)
     const res = await send(seeded, { message: "Đọc mục 2" })
     expect(res.status).toBe(401)
@@ -211,26 +206,8 @@ describe("trợ lý Google Docs", () => {
     expect(await balance(seeded)).toBe(before)
   })
 
-  it("Google Doc không thuộc dự án (dự án khác / chưa liên kết) ⇒ 404 GOOGLE_DOC_NOT_IN_PROJECT, không gọi Docs, không trừ credit", async () => {
-    const seeded = await seedProject()
-    await connectGoogle(seeded)
-    const other = await seedProject()
-    const before = await balance(seeded)
-
-    for (const documentId of ["doc-cua-du-an-khac", "doc-chua-lien-ket"]) {
-      if (documentId === "doc-cua-du-an-khac") {
-        await GoogleDocLink.create({ projectId: other.projectId, userId: other.userId, kind: "export", fileId: documentId, title: "SRS khác", webViewLink: "l", exportedAt: new Date() })
-      }
-      const res = await send(seeded, { documentId, message: "Đọc mục 2" })
-      expect(res.status).toBe(404)
-      expect(JSON.parse(res.body as string).error.code).toBe("GOOGLE_DOC_NOT_IN_PROJECT")
-    }
-    expect(h.documents.get).not.toHaveBeenCalled()
-    expect(await balance(seeded)).toBe(before)
-  })
-
   it("model lỗi giữa chừng ⇒ sự kiện error, hoàn credit, không giữ credit treo", async () => {
-    const seeded = await seedProject()
+    const seeded = await seedFixture("minimal")
     await connectGoogle(seeded)
     const before = await balance(seeded)
     h.steps.push(toolStep([["get_outline", { documentId: "doc-srs-1" }]]), new Error("provider overloaded"))
@@ -243,7 +220,7 @@ describe("trợ lý Google Docs", () => {
   })
 
   it("body sai ⇒ 400 VALIDATION_ERROR; history quá 12 tin ⇒ 400", async () => {
-    const seeded = await seedProject()
+    const seeded = await seedFixture("minimal")
     const empty = await send(seeded, { message: "  " })
     expect(empty.status).toBe(400)
     const history = Array.from({ length: 13 }, () => ({ role: "user", content: "x" }))

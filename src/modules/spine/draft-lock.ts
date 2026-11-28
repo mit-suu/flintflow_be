@@ -8,6 +8,7 @@
  */
 
 import type { Spine } from "./spine.types.js"
+import * as spineRepository from "./spine.repository.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
 export const DRAFT_LOCKED = "DRAFT_LOCKED"
@@ -18,4 +19,13 @@ export const assertDraftUnlocked = (spine: Pick<Spine, "baseline_submission"> | 
   if (spine && isDraftLocked(spine)) {
     throw new ApiError(409, "Tài liệu đang chờ Lead duyệt nên tạm khoá sửa. Chờ Lead duyệt hoặc từ chối rồi sửa tiếp.", DRAFT_LOCKED)
   }
+}
+
+/**
+ * Bản nộp baseline 1.0 và gói duyệt sau baseline cùng nằm ở `baseline_submission` ⇒ một lần kiểm phủ cả hai trạng thái
+ * chờ Lead (business-flow §2, C-7). Dùng ở các đường người dùng chạy step / cổng / mở lại step, trước khi giữ khoá lượt
+ * chạy hay giữ credit, để bị từ chối thì không tốn gì.
+ */
+export const assertProjectUnlocked = async (projectId: string): Promise<void> => {
+  assertDraftUnlocked(await spineRepository.get(projectId))
 }

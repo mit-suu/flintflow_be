@@ -7,9 +7,10 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { validationError } from "../../shared/utils/validation-message.js"
 import { newPasswordField } from "../../shared/utils/password-field.js"
 import { USER_LOCALES } from "../../shared/i18n/locale.js"
+import { EXPLANATION_STYLES } from "../../shared/ai/explanation-style.js"
 
 /**
- * `PATCH /users/me` — onboarding (UC 1.12), ngôn ngữ giao diện (FLF-259) và tổ chức mặc định (FLF-427); không cho đổi
+ * `PATCH /users/me` — onboarding (UC 1.12), ngôn ngữ giao diện (FLF-259) tổ chức mặc định (FLF-427), email việc duyệt (UC-89) và cách AI trình bày phân tích (UC-90); không cho đổi
  * email/role/isActive.
  */
 export const updateMeSchema = z
@@ -17,14 +18,18 @@ export const updateMeSchema = z
     name: z.string().trim().min(1).max(100).optional(),
     onboardedAt: z.iso.datetime().nullable().optional(),
     locale: z.enum(USER_LOCALES).optional(),
-    preferredOrganizationId: z.string().nullable().optional()
+    preferredOrganizationId: z.string().nullable().optional(),
+    approvalEmails: z.boolean().optional(),
+    explanationStyle: z.enum(EXPLANATION_STYLES).optional()
   })
   .refine(
     (v) =>
       v.name !== undefined ||
       v.onboardedAt !== undefined ||
       v.locale !== undefined ||
-      v.preferredOrganizationId !== undefined,
+      v.preferredOrganizationId !== undefined ||
+      v.approvalEmails !== undefined ||
+      v.explanationStyle !== undefined,
     {
       message: "Chưa có thông tin nào để cập nhật."
     }
@@ -78,14 +83,16 @@ export const updateMe = catchAsync(async (req: Request, res: Response) => {
   const parsed = updateMeSchema.safeParse(req.body)
   if (!parsed.success) throw validationError(parsed.error)
 
-  const { name, onboardedAt, locale, preferredOrganizationId } = parsed.data
+  const { name, onboardedAt, locale, preferredOrganizationId, approvalEmails, explanationStyle } = parsed.data
   const user = await userService.updateMe(
     userId,
     {
       ...(name === undefined ? {} : { name }),
       ...(onboardedAt === undefined ? {} : { onboardedAt: onboardedAt === null ? null : new Date(onboardedAt) }),
       ...(locale === undefined ? {} : { locale }),
-      ...(preferredOrganizationId === undefined ? {} : { preferredOrganizationId })
+      ...(preferredOrganizationId === undefined ? {} : { preferredOrganizationId }),
+      ...(approvalEmails === undefined ? {} : { approvalEmails }),
+      ...(explanationStyle === undefined ? {} : { explanationStyle })
     },
     req.user?.orgId
   )

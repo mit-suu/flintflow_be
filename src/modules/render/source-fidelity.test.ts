@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { RenderedDocument } from "./rendered-document.types.js"
-import { pristineSectionIds, rearrangeOf, sourceBasedFrom } from "./source-fidelity.js"
+import { createEmptySpine } from "../spine/spine.repository.js"
+import { fidelityFrom, layoutConfirmationValid, layoutSignatureOf, pristineSectionIds, rearrangeOf, sourceBasedFrom } from "./source-fidelity.js"
 
 const doc = (sections: RenderedDocument["sections"]): RenderedDocument => ({
   projectId: "p", projectName: "Portal", version: "0.1", source: "draft", generatedAt: "2026-11-06T00:00:00Z", recordOfChanges: [], sections
@@ -62,8 +63,13 @@ describe("rearrangeOf - FLF-416 sắp lại bố cục chế độ 4", () => {
     { section_id: "custom:c1", status: "out_of_scope" },
     { section_id: "fixed:II.1", status: "present" }
   ]
-  it("chế độ 4 đã vào Luồng 2 ⇒ mục Ngoài phạm vi xuống cuối", () => {
-    expect(rearrangeOf({ template_intent: "free", mode: "fpt" }, { source_file_ref: "f", target_structure: { resolved_mode: 4, sections }, flow2_entry_at: "2026-11-12" })).toEqual({ moveToEnd: ["custom:c1"] })
+  it("FLF-461: chế độ 4 đã vào Luồng 2 và người dùng đã xác nhận bố cục (2.9a) ⇒ mục Ngoài phạm vi xuống cuối", () => {
+    const profile = { source_file_ref: "f", target_structure: { resolved_mode: 4, sections }, flow2_entry_at: "2026-11-12", layout_confirmed_at: "2026-11-13" }
+    expect(rearrangeOf({ template_intent: "free", mode: "fpt" }, profile)).toEqual({ moveToEnd: ["custom:c1"] })
+  })
+  it("FLF-461: chưa xác nhận bố cục xem trước ⇒ bản nháp: mục thêm thành heading mới, chưa chuyển Ngoài phạm vi xuống cuối", () => {
+    expect(rearrangeOf({ template_intent: "free", mode: "fpt" }, { source_file_ref: "f", target_structure: { resolved_mode: 4, sections }, flow2_entry_at: "2026-11-12" })).toEqual({ moveToEnd: [] })
+    expect(rearrangeOf({ template_intent: "free", mode: "fpt" }, { source_file_ref: "f", target_structure: { resolved_mode: 4, sections }, flow2_entry_at: "2026-11-12", layout_confirmed_at: null })).toEqual({ moveToEnd: [] })
   })
   it("giữ khung (chế độ 3), chưa vào Luồng 2 ⇒ không sắp lại", () => {
     expect(rearrangeOf({ template_intent: "fixed", mode: "fpt" }, { source_file_ref: "f", target_structure: { resolved_mode: 3, sections }, flow2_entry_at: "2026-11-12" })).toBeNull()
@@ -106,6 +112,17 @@ describe("sourceBasedFrom - sau khi đổi mẫu file nền mới là nền ở 
   })
 })
 
+describe("pristineSectionIds - đường dẫn phần tử (FLF-443)", () => {
+  it("path chỉ để đặt chip Nguồn: bản in lúc import (chưa có path) vẫn khớp bản hiện tại (có path)", () => {
+    const table = (extra: object) => ({ type: "table" as const, header: [[{ text: "ID" }]], rows: [[[{ text: "A1" }]]], ...extra })
+    const imported = doc([{ id: "fixed:2.1", number: "2.1", heading: "Actors", level: 2, blocks: [para("Intro"), table({})] }])
+    const current = doc([
+      { id: "fixed:2.1", number: "2.1", heading: "Actors", level: 2, blocks: [{ ...para("Intro"), entity_path: "actors[id=A1]" }, table({ row_entity_paths: ["actors[id=A1]"] })] }
+    ])
+    expect(pristineSectionIds(current, imported)).toEqual(new Set(["fixed:2.1"]))
+  })
+})
+
 describe("pristineSectionIds - khoá mục", () => {
   const imported = doc([
     { id: "fixed:1", number: "1", heading: "Product Overview", level: 1, blocks: [para("Same body.")] },
@@ -129,6 +146,30 @@ describe("pristineSectionIds - khoá mục", () => {
   })
 })
 
+describe("fidelityFrom - importedSectionIds (FLF-468 lát A)", () => {
+  const spineStub = {} as Parameters<typeof fidelityFrom>[2]
+
+  it("đang dựng chính bản import (chưa có Spine mốc) ⇒ mọi mục hiện tại coi như đã có lúc import", async () => {
+    const current = doc([{ id: "function:FN1", number: "3.1.1", heading: "Sign in", level: 3, blocks: [para("A")] }])
+    const result = await fidelityFrom(current, async () => current, null, false)
+    expect(result.importedSectionIds).toEqual(new Set(["function:FN1"]))
+    expect(result.keepSource).toEqual(new Set(["function:FN1"]))
+  })
+
+  it("Spine mốc có mục mà bản in hiện tại không còn section ⇒ mục đó vẫn nằm trong importedSectionIds (đã bị CR xoá)", async () => {
+    const imported = doc([
+      { id: "function:FN1", number: "3.1.1", heading: "Sign in", level: 3, blocks: [para("A")] },
+      { id: "function:FN2", number: "3.1.2", heading: "Export schedule", level: 3, blocks: [para("B")] }
+    ])
+    // Bản hiện tại: chức năng Export schedule đã bị CR xoá ⇒ Spine hiện tại không còn dựng được section đó
+    const current = doc([{ id: "function:FN1", number: "3.1.1", heading: "Sign in", level: 3, blocks: [para("A")] }])
+    const result = await fidelityFrom(current, async () => imported, spineStub, false)
+    expect(result.importedSectionIds).toEqual(new Set(["function:FN1", "function:FN2"]))
+    // Mục còn section (FN1) nhưng in khác lúc import ở ví dụ này thì không nguyên vẹn — ở đây giống lúc import ⇒ vẫn giữ
+    expect(result.keepSource).toEqual(new Set(["function:FN1"]))
+  })
+})
+
 describe("pristineSectionIds - mục in giống hệt lúc import", () => {
   it("so heading + khối của từng mục; mục sửa / mục mới không nguyên vẹn; trạng thái duyệt không tính", () => {
     const imported = doc([
@@ -141,5 +182,23 @@ describe("pristineSectionIds - mục in giống hệt lúc import", () => {
       { id: "fixed:5.2", number: "5.2", heading: "Common Requirements", level: 2, blocks: [para("New")] }
     ])
     expect(pristineSectionIds(current, imported)).toEqual(new Set(["fixed:1"]))
+  })
+})
+
+describe("layoutConfirmationValid - FLF-461 xác nhận bố cục hết hiệu lực khi bố cục đổi", () => {
+  const spine = createEmptySpine({ name: "X" })
+  const confirmed = { layout_confirmed_at: "2026-11-13", layout_confirmed_signature: layoutSignatureOf(spine) }
+  it("chưa xác nhận ⇒ không hợp lệ; xác nhận cũ chưa có dấu ⇒ còn hợp lệ", () => {
+    expect(layoutConfirmationValid({ source_file_ref: "f" }, spine)).toBe(false)
+    expect(layoutConfirmationValid({ source_file_ref: "f", layout_confirmed_at: "2026-11-13" }, spine)).toBe(true)
+  })
+  it("bố cục không đổi ⇒ hợp lệ; thêm mục riêng sau xác nhận ⇒ hết hiệu lực và rearrange về bản nháp", () => {
+    expect(layoutConfirmationValid({ source_file_ref: "f", ...confirmed }, spine)).toBe(true)
+    const changed = { ...spine, custom_sections: [{ id: "c9", heading: "Mới", level: 2, body: "" }] } as unknown as typeof spine
+    expect(layoutSignatureOf(changed)).not.toBe(layoutSignatureOf(spine))
+    expect(layoutConfirmationValid({ source_file_ref: "f", ...confirmed }, changed)).toBe(false)
+    const profile = { source_file_ref: "f", ...confirmed, flow2_entry_at: "2026-11-12", target_structure: { resolved_mode: 4, sections: [{ section_id: "custom:c1", status: "out_of_scope" }] } }
+    expect(rearrangeOf({ template_intent: "free", mode: "fpt" }, profile, changed)).toEqual({ moveToEnd: [] })
+    expect(rearrangeOf({ template_intent: "free", mode: "fpt" }, profile, spine)).toEqual({ moveToEnd: ["custom:c1"] })
   })
 })

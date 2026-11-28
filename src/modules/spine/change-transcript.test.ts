@@ -65,13 +65,36 @@ describe("previewPayload", () => {
     expect(previewPayload(preview, "vi").reply).toContain("Áp dụng")
   })
 
+  it("FLF-473 (B5): có crPrefill ⇒ câu mời \"Mở change request\" + payload.cr_prefill, không phải câu \"nói rõ mục\"", () => {
+    const prefill = { title: "sửa đoạn use case", description: "sửa đoạn use case", source: { kind: "verbal" as const, ref: null } }
+    const payload = previewPayload(
+      { ...base, ok: false, clarification: "Mình chưa xác định được cần đổi gì trong tài liệu. Bạn nói rõ mục..." },
+      "vi",
+      { requiresCr: true, crPrefill: prefill }
+    )
+    expect(payload).toEqual({ kind: "change_clarification", reply: expect.stringContaining("Mở change request"), cr_prefill: prefill })
+    expect(payload.reply).not.toContain("nói rõ mục")
+  })
+
+  it("FLF-473 (B5): không có crPrefill (câu hỏi làm rõ bình thường) ⇒ giữ nguyên câu hỏi, không có cr_prefill", () => {
+    const payload = previewPayload({ ...base, ok: false, clarification: "Bạn muốn sửa use case nào?" }, "vi", { requiresCr: true })
+    expect(payload).toEqual({ kind: "change_clarification", reply: "Bạn muốn sửa use case nào?" })
+    expect(payload).not.toHaveProperty("cr_prefill")
+  })
+
   it("FLF-311: câu hỏi kèm lựa chọn ⇒ payload có questions[].options để FE hiện thẻ chọn nhanh", () => {
     const payload = previewPayload({ ...base, ok: false, clarification: "Màn hình riêng hay popup?", clarification_choices: ["Màn hình riêng", "Popup mở từ My Grades"] })
     expect(payload).toEqual({
       kind: "change_clarification",
       reply: "Màn hình riêng hay popup?",
-      questions: [{ question: "Chọn giao diện", options: [{ label: "Màn hình riêng" }, { label: "Popup mở từ My Grades" }] }]
+      questions: [{ question: "Màn hình riêng hay popup?", options: [{ label: "Màn hình riêng" }, { label: "Popup mở từ My Grades" }] }]
     })
+  })
+
+  it("P08 #1 (FLF-480): question là chính câu clarification, không cố định 'Chọn giao diện' khi câu hỏi không về giao diện", () => {
+    const payload = previewPayload({ ...base, ok: false, clarification: "Áp dụng từ ngày nào?", clarification_choices: ["Ngay bây giờ", "Từ học kỳ sau"] })
+    expect(payload).toMatchObject({ questions: [{ question: "Áp dụng từ ngày nào?" }] })
+    expect(payload.questions).not.toEqual(expect.arrayContaining([expect.objectContaining({ question: "Chọn giao diện" })]))
   })
 
   it("FLF-298: notes (vd use case mới chưa có màn hình) nối vào câu trả lời", () => {
@@ -170,5 +193,54 @@ describe("pendingChangeRequest - P08 T7", () => {
   it("không có câu hỏi đang chờ ⇒ null", () => {
     expect(pendingChangeRequest([msg("user", "đổi tên A01")])).toBeNull()
     expect(pendingChangeRequest([])).toBeNull()
+  })
+})
+
+describe("lệnh nhiều ý: bản xem trước một phần đi cùng câu hỏi", () => {
+  const base: ChangePreviewResult = { ok: true, txn: "t", base_version: 1, ops: [], changes: [{ op: "set", path: "actors[id=A01].name", before: "A", value: "B", reason: null }], violations: [], referrers: [], preview_id: "pv" }
+  const ask = (q: string) => msg("ai", JSON.stringify({ kind: "change_clarification", reply: q }))
+  const appliedOpen = msg("ai", JSON.stringify({ kind: "change_applied", reply: "Đã áp dụng 1 thay đổi", request_open: true }))
+
+  it("có bản xem trước + câu hỏi ⇒ vẫn là change_clarification (đếm lượt hỏi), kèm preview_id và số thay đổi", () => {
+    const payload = previewPayload({ ...base, clarification: "Màn nào cần popup?" })
+    expect(payload).toMatchObject({ kind: "change_clarification", preview_id: "pv", change_count: 1 })
+    expect(String(payload.reply)).toContain("Màn nào cần popup?")
+    expect(String(payload.reply)).toContain("1 thay đổi")
+  })
+
+  it("bản một phần đã áp (request_open) không khép yêu cầu: câu trả lời kế tiếp vẫn nối với yêu cầu gốc", () => {
+    const messages = [msg("user", "đổi tên A01 và thêm popup"), ask("Màn nào?"), appliedOpen, msg("user", "Login")]
+    expect(clarificationRounds(messages)).toBe(1)
+    expect(pendingChangeRequest(messages)).toEqual({ request: "đổi tên A01 và thêm popup", question: "Màn nào?" })
+  })
+})
+
+describe("previewPayload - cảnh báo, dự báo cờ đỏ, tự ghi", () => {
+  const base: ChangePreviewResult = { ok: true, txn: "t", base_version: 1, ops: [], changes: [{ op: "set", path: "actors[id=A01].name", before: "A", value: "B", reason: null }], violations: [], referrers: [], preview_id: "pv" }
+
+  it("có cảnh báo ⇒ lời cảnh báo nằm trong câu trả lời, mời bấm 'Vẫn làm', payload mang warning", () => {
+    const payload = previewPayload({ ...base, warning: "Trái điều đã chốt." })
+    expect(payload).toMatchObject({ kind: "change_preview", warning: "Trái điều đã chốt." })
+    expect(String(payload.reply)).toContain("Trái điều đã chốt.")
+    expect(String(payload.reply)).toContain("Vẫn làm")
+    expect(String(previewPayload({ ...base, warning: "x" }, "en").reply)).toContain("Do it anyway")
+  })
+
+  it("dự báo cờ đỏ và lý do chờ xác nhận chỉ lưu số / chữ gọn vào phiên", () => {
+    const payload = previewPayload({
+      ...base,
+      predicted_red_flags: [{ rule_id: "vague_wording", section_id: "fixed:4.2.3", target_id: "N07", message: "x" }],
+      confirm_reason: "Thay đổi này mở thêm 1 cờ đỏ chặn baseline"
+    })
+    expect(payload).toMatchObject({ predicted_red_count: 1, confirm_reason: "Thay đổi này mở thêm 1 cờ đỏ chặn baseline" })
+    expect(JSON.stringify(payload)).not.toContain("vague_wording")
+  })
+
+  it("tự ghi ⇒ tin change_applied, hoàn tác được, không còn preview_id", () => {
+    const payload = previewPayload({ ...base, preview_id: undefined, auto_applied: true, applied_version: 5, notes: "Đã đổi tên." })
+    expect(payload).toMatchObject({ kind: "change_applied", count: 1, spine_version: 5, auto_applied: true })
+    expect(String(payload.reply)).toContain("Đã tự áp dụng 1 thay đổi")
+    expect(String(payload.reply)).toContain("Đã đổi tên.")
+    expect(payload).not.toHaveProperty("preview_id")
   })
 })

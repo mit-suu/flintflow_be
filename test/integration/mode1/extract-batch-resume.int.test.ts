@@ -8,9 +8,9 @@ vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await imp
 
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { createMode1Project, fakeMode1, mode1Api } from "../../helpers/mode1.js"
-import { importAtExtracting, useExtractConcurrency } from "../../helpers/mode1-import-p4.js"
+import { importAtExtracting, useExtractConcurrency, runExtraction } from "../../helpers/mode1-import-p4.js"
 import { seedFixture } from "../../setup.js"
-import { AI_BLOCK_CHARS, estimateExtraction, runExtraction } from "../../../src/modules/import/extract.service.js"
+import { AI_BLOCK_CHARS, estimateExtraction } from "../../../src/modules/import/extract.service.js"
 import { ExtractionDraft } from "../../../src/modules/import/extraction-draft.model.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { getImportResponseSchema } from "../../../src/modules/import/import.dto.js"
@@ -81,8 +81,8 @@ describe("I-4 - chạy tiếp theo từng lô", () => {
     expect(paused.partial!.raw_steps).toHaveLength(1)
     expect(await wallet(ctx.userId)).toMatchObject({ balance: 998, reserved: 0 })
 
-    // ước tính lúc dừng = phần còn lại (2 lô của mục 1 + 5 mục chữ khác)
-    expect(await estimateExtraction(ctx.projectId, first.doc)).toMatchObject({ text_batches: 7, diagram_images: 0, ai_calls: 7, credits: 14 })
+    // ước tính lúc dừng = phần còn lại (2 lô của mục 1 + 5 mục chữ khác + mục riêng "5.9 Team Notes", FLF-444)
+    expect(await estimateExtraction(ctx.projectId, first.doc)).toMatchObject({ text_batches: 8, diagram_images: 0, ai_calls: 8, credits: 16 })
 
     calls = []
     mockOverrides.next = record(fakeMode1)
@@ -90,7 +90,7 @@ describe("I-4 - chạy tiếp theo từng lô", () => {
     const resumed = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
     expect(resumed.doc.status).toBe("baselining")
     expect(calls.filter((c) => c.section === "fixed:1").map((c) => c.marks[0])).toEqual(["05", "09"])
-    expect(calls).toHaveLength(7)
+    expect(calls).toHaveLength(8)
     expect(await deducted(ctx.projectId, "I-4:fixed:1")).toBe(3)
     expect(await Usage.countDocuments({ projectId: ctx.projectId, state: "reserved" })).toBe(0)
     // tổng tiền như chạy một mạch
@@ -141,10 +141,11 @@ describe("I-4 - ước tính credit", () => {
       text_batches: calls.filter((c) => !c.image).length,
       diagram_images: calls.filter((c) => c.image).length,
       ai_calls: calls.length,
-      credits: 18
+      credits: 20
     })
-    expect(estimate).toMatchObject({ text_batches: 8, diagram_images: 1, ai_calls: 9, credits: 18 })
-    // estimate.credits là cận trên mức giữ (18 = 9 lượt × 2), còn thực trừ quyết toán theo token nên <= 18
+    // FLF-444: + một lô chữ của mục riêng "5.9 Team Notes" (đọc theo nội dung)
+    expect(estimate).toMatchObject({ text_batches: 9, diagram_images: 1, ai_calls: 10, credits: 20 })
+    // estimate.credits là cận trên mức giữ (20 = 10 lượt × 2), còn thực trừ quyết toán theo token nên <= 20
     expect(charged).toBeGreaterThanOrEqual(calls.length)
     expect(charged).toBeLessThanOrEqual(estimate!.credits)
     expect(await Usage.countDocuments({ projectId: ctx.projectId, state: "deducted" })).toBe(calls.length)

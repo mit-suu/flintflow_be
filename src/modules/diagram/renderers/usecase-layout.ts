@@ -1,6 +1,6 @@
 /**
- * Hình học sơ đồ use case (UML 2.5.1) và sơ đồ phân cấp actor — port từ `docs/technical/usecase-diagram-layout.md`
- * §2–§7 (bản chạy được ở `docs/diagrams/usecase/build-diagrams.mjs`). Đơn vị px, trục y hướng xuống (khớp `Scene`).
+ * Hình học sơ đồ use case (UML 2.5.1) và sơ đồ phân cấp actor — port từ đặc tả layout use case của tài liệu dự án
+ * §2–§7. Đơn vị px, trục y hướng xuống (khớp `Scene`).
  *
  * Ba cột: actor người bên trái, khung hệ thống ở giữa chứa một cột ellipse, actor `system`/`time` bên phải; cả hai cột
  * actor nằm NGOÀI khung. Quy ước này là phương án đầu tiên; không sạch thì `layoutOptions` thử đổi thứ tự hàng và chia actor
@@ -221,7 +221,7 @@ const buildScene = (d: UseCaseDiagram, option: LayoutOption): Scene => {
   const ry = Math.ceil(textH / 1.41 + 22)
 
   const cx = 0
-  const half = Math.max(rx + BOUND_PAD_X, Math.ceil(textWidth(d.system, TITLE_SIZE, true) / 2) + 24)
+  const half = Math.max(rx + BOUND_PAD_X, Math.ceil(textWidth(d.system, TITLE_SIZE) / 2) + 24)
   rows.forEach((r, i) => (r.cy = BOUND_PAD_TOP + ry + i * (2 * ry + ROW_GAP)))
   const boundBottom = (rows[rows.length - 1]?.cy ?? BOUND_PAD_TOP) + ry + BOUND_PAD_BOTTOM
 
@@ -271,7 +271,7 @@ const buildScene = (d: UseCaseDiagram, option: LayoutOption): Scene => {
   const hand = (a: DiagramActor): [number, number] => [columnX(a) + (sideOf(a) === "left" ? FIGURE.arm / 2 : -FIGURE.arm / 2), tops.get(a.id)! + FIGURE.armY]
 
   scene.rect("system", -half, 0, 2 * half, boundBottom, { fill: FILL, container: true, name: d.system })
-  scene.text("system#name", cx, BOUND_PAD_TOP / 2 + 1, d.system, { size: TITLE_SIZE, bold: true, owner: "system" })
+  scene.text("system#name", cx, BOUND_PAD_TOP / 2 + 1, d.system, { size: TITLE_SIZE, owner: "system" })
 
   // Association trước: ellipse vẽ đè đầu mút
   for (const link of d.associations) {

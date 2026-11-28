@@ -2,6 +2,7 @@ import { Router } from "express"
 import multer from "multer"
 import * as projectController from "./project.controller.js"
 import * as chatSessionController from "./chat-session.controller.js"
+import { streamProjectEvents } from "./project-events.controller.js"
 import * as projectDocumentController from "./project-document.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
 import { requireRole } from "../../shared/auth/require-role.middleware.js"
@@ -292,6 +293,112 @@ router.post(
 
 /**
  * @swagger
+ * /api/v1/projects/{projectId}/documents/summarize:
+ *   post:
+ *     summary: "Xác nhận AI đọc tài liệu tham khảo đang chờ (business-flow §3.6: báo credit trước, FLF-458)"
+ *     description: >
+ *       Upload (`POST .../documents`) chỉ trích chữ, không gọi AI; credit cần để AI đọc các tài liệu đang chờ
+ *       (`summaryStatus: "pending"`) báo ở `GET .../documents` `meta.summary_credit_estimate`. Gọi endpoint này sau khi người
+ *       dùng xác nhận mới trừ credit và đọc thật. `document_ids` rỗng / bỏ trống ⇒ đọc hết tài liệu đang chờ của dự án.
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               document_ids:
+ *                 type: array
+ *                 items: { type: string }
+ *     responses:
+ *       200:
+ *         description: Danh sách tài liệu vừa đọc (`summaryStatus` `success` hoặc `failed` — lỗi một tài liệu không chặn tài liệu khác)
+ *       401:
+ *         description: Chưa xác thực
+ *       403:
+ *         description: Viewer không đọc được
+ */
+router.post(
+  "/:projectId/documents/summarize",
+  authMiddleware,
+  requireRole("lead", "analyst"),
+  projectDocumentController.summarizeDocuments
+)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/documents/{docId}/text:
+ *   get:
+ *     summary: Chữ đã trích của tài liệu tham khảo, chia đoạn theo mã `D<n>-P<mm>` (FLF-443)
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: docId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: "`{ id, name, paragraphs: [{ para_id, text }] }` - `para_id` khớp `GET /sources`; bản đã bị thay vẫn đọc được"
+ *       401:
+ *         description: Chưa xác thực
+ *       403:
+ *         description: Viewer không đọc được
+ *       404:
+ *         description: "`DOCUMENT_NOT_FOUND` - id sai định dạng, không có, hoặc thuộc dự án khác"
+ */
+router.get("/:projectId/documents/:docId/text", authMiddleware, requireRole("lead", "analyst"), projectDocumentController.getDocumentText)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/documents/{docId}/download:
+ *   get:
+ *     summary: Tải file gốc của tài liệu tham khảo (FLF-443)
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: docId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: "File gốc (không bọc envelope), `Content-Disposition: attachment` giữ tên gốc, `X-Content-Type-Options: nosniff`"
+ *       401:
+ *         description: Chưa xác thực
+ *       403:
+ *         description: Viewer không đọc được
+ *       404:
+ *         description: "`DOCUMENT_NOT_FOUND`"
+ *       503:
+ *         description: "`DOCUMENT_UNAVAILABLE` - kho lưu trữ lỗi / quá thời gian / file mất / vượt 10 MB"
+ */
+router.get("/:projectId/documents/:docId/download", authMiddleware, requireRole("lead", "analyst"), projectDocumentController.downloadDocument)
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/documents/{documentId}:
  *   delete:
  *     summary: Xóa tài liệu đính kèm khỏi dự án
@@ -518,7 +625,10 @@ router.patch(
  *                 enum: [chen, crowsfoot, idef1x]
  *     responses:
  *       200:
- *         description: Dự án sau khi đổi (kèm erdNotation)
+ *         description: >
+ *           Dự án sau khi đổi (kèm erdNotation) ở `data`; `meta.erdRedraw` (FLF-477, thêm trường) báo kết quả vẽ lại:
+ *           `done` đã vẽ lại xong, `skipped` dự án chưa có hình ERD, `pending` vẫn chưa vẽ lại được sau khi thử lại
+ *           (một bước pipeline đang ghi Spine) — nên báo người dùng và gợi ý bấm "Vẽ lại" sau.
  *       400:
  *         description: VALIDATION_ERROR — giá trị ngoài chen/crowsfoot/idef1x hoặc có key lạ
  *       403:
@@ -964,5 +1074,27 @@ router.post("/:projectId/chats/:chatId/messages", authMiddleware, requireRole("l
  *         description: KNOWLEDGE_DISABLED — gửi knowledge=true khi server tắt Knowledge RAG
  */
 router.post("/:projectId/chats/:chatId/messages/stream", authMiddleware, requireRole("lead", "analyst"), chatSessionController.sendMessageStream)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/events:
+ *   get:
+ *     summary: Luồng SSE báo ghi tài liệu + thông báo mới (FLF-487, pipeline-contract #40)
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: "text/event-stream — ready { spine_version }, spine_written { actor_user_id, actor_name, source, cr_id, sections[], more, spine_version, at }, notification_created { notification_id, organization_id, at }, bye { reason }; comment `: ping` giữ kết nối"
+ *       404:
+ *         description: PROJECT_NOT_FOUND
+ */
+router.get("/:projectId/events", authMiddleware, streamProjectEvents)
 
 export default router

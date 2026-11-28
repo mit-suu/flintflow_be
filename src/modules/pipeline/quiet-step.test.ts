@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Decision, Spine } from "../spine/spine.types.js"
-import { ALWAYS_GATE, conflictsWithLedger, isQuietStep, type QuietInput } from "./quiet-step.js"
+import { ALWAYS_GATE, chatEditVerdict, conflictsWithLedger, hardGateOf, isQuietStep, touchesOnlySkippedSections, type ChatEditInput, type QuietInput } from "./quiet-step.js"
 
 const spineWith = (decisions: Decision[] = []): Spine => ({ decisions } as unknown as Spine)
 
@@ -54,10 +54,22 @@ describe("isQuietStep (R1)", () => {
     expect(isQuietStep(input())).toMatchObject({ quiet: true })
   })
 
-  it("FLF-220: bước đã hỏi và user đã trả lời ⇒ Cuối giai đoạn không dừng giữa phase; Mọi bước vẫn dừng", () => {
-    expect(isQuietStep(input({ asked: true, reviewMode: "fast" })).quiet).toBe(true)
-    expect(isQuietStep(input({ asked: true, reviewMode: "balanced" })).quiet).toBe(true)
-    expect(isQuietStep(input({ asked: true, reviewMode: "strict" })).quiet).toBe(false)
+  // FLF-449 (03-can-chot #1) thay FLF-220: trước đây bước có hỏi vẫn tự qua ở "Cuối giai đoạn"; BF §1.2 "Step tự qua khi
+  // không hỏi gì" ⇒ có hỏi thì dừng ở mọi mức duyệt.
+  it("FLF-449: bước đã hỏi user trong lượt ⇒ không tự qua ở mọi mức duyệt", () => {
+    for (const reviewMode of ["strict", "fast", "balanced", "milestones"] as const) {
+      const verdict = isQuietStep(input({ asked: true, reviewMode, spine: { decisions: [], project: { system_name: "Lumen" } } as unknown as Spine }))
+      expect(verdict.quiet, reviewMode).toBe(false)
+    }
+    expect(isQuietStep(input({ asked: true, reviewMode: "fast" })).reason_vi).toContain("đã hỏi")
+  })
+
+  it("FLF-449: có hỏi vẫn dừng kể cả khi bước chỉ chạm phần đã chọn không hỏi lại; không hỏi thì tự qua như cũ", () => {
+    const spine = { decisions: [], project: { skip_confirm_sections: ["fixed:5"], system_name: "Lumen" } } as unknown as Spine
+    expect(isQuietStep(input({ asked: true, reviewMode: "fast", touchedSections: ["fixed:5"], spine })).quiet).toBe(false)
+    expect(isQuietStep(input({ asked: true, reviewMode: "strict", touchedSections: ["fixed:5"], spine })).quiet).toBe(false)
+    expect(isQuietStep(input({ asked: false, reviewMode: "fast", touchedSections: ["fixed:5"], spine })).quiet).toBe(true)
+    expect(isQuietStep(input({ asked: false, reviewMode: "milestones", spine })).quiet).toBe(true)
   })
 
   it("mọi lý do khiến user cần nhìn đều chặn tự Accept", () => {
@@ -186,5 +198,61 @@ describe("FLF-432 (FLF-413 #8): bước soạn mà mục của nó còn trống 
   })
   it("mục đã có nội dung ⇒ như cũ", () => {
     expect(isQuietStep(input({ templateId: "S-7.3", emptySections: [] })).quiet).toBe(true)
+  })
+})
+
+describe("lõi cổng cứng dùng chung với bản sửa qua chat", () => {
+  const spineWith2 = (project: Record<string, unknown> = {}): Spine => ({ decisions: [], project } as unknown as Spine)
+  const edit = (over: Partial<ChatEditInput> = {}): ChatEditInput => ({
+    reviewMode: "balanced",
+    touchedSections: ["fixed:2.1"],
+    redDelta: 0,
+    newAssumptions: [],
+    needsPerson: false,
+    spine: spineWith2(),
+    ...over
+  })
+
+  it("hardGateOf: cờ đỏ mới, xoá nội dung, lỗi vẽ, giả định trái điều đã chốt; không có ⇒ null", () => {
+    const base = { redDelta: 0, newAssumptions: [], spine: spineWith2() }
+    expect(hardGateOf(base)).toBeNull()
+    expect(hardGateOf({ ...base, redDelta: 2 })).toEqual({ kind: "red_flags", count: 2 })
+    expect(hardGateOf({ ...base, contentRemoved: true })).toEqual({ kind: "content_removed" })
+    expect(hardGateOf({ ...base, renderFailed: true })).toEqual({ kind: "render_failed" })
+    const decided = { decisions: [{ topic_key: "reliability_uptime", answer: "99%", superseded_by: null }], project: {} } as unknown as Spine
+    expect(hardGateOf({ ...base, spine: decided, newAssumptions: [{ id: "a", text: "Uptime is 99.5 percent" }] })).toEqual({ kind: "assumption_conflict", count: 1 })
+  })
+
+  it("bước vẫn dùng đúng câu lý do cũ sau khi tách lõi", () => {
+    expect(isQuietStep(input({ redDelta: 2 })).reason_vi).toBe("Bước mở thêm 2 cờ đỏ")
+    expect(isQuietStep(input({ contentRemoved: true })).reason_vi).toBe("Bước xoá nội dung đã có")
+    expect(isQuietStep(input({ renderFailed: true })).reason_vi).toBe("Có sơ đồ vẽ lỗi")
+  })
+
+  it("touchesOnlySkippedSections: cần có section và mọi section đều trong danh sách", () => {
+    const spine = spineWith2({ skip_confirm_sections: ["fixed:2.1", "fixed:5.1"] })
+    expect(touchesOnlySkippedSections(["fixed:2.1", "fixed:5.1"], spine)).toBe(true)
+    expect(touchesOnlySkippedSections(["fixed:2.1", "fixed:3.1.2"], spine)).toBe(false)
+    expect(touchesOnlySkippedSections([], spine)).toBe(false)
+  })
+
+  it("chatEditVerdict: strict dừng, ba mức còn lại tự ghi", () => {
+    expect(chatEditVerdict(edit({ reviewMode: "strict" })).quiet).toBe(false)
+    for (const reviewMode of ["balanced", "fast", "milestones"] as const) expect(chatEditVerdict(edit({ reviewMode })).quiet, reviewMode).toBe(true)
+  })
+
+  it("chatEditVerdict: cổng cứng thắng mọi mức, kể cả 'không hỏi lại'", () => {
+    const skipping = spineWith2({ skip_confirm_sections: ["fixed:2.1"] })
+    for (const reviewMode of ["strict", "balanced", "fast", "milestones"] as const) {
+      expect(chatEditVerdict(edit({ reviewMode, spine: skipping, needsPerson: true })).quiet, `${reviewMode} cần người`).toBe(false)
+      expect(chatEditVerdict(edit({ reviewMode, spine: skipping, contentRemoved: true })).reason_vi, `${reviewMode} xoá`).toContain("xoá")
+      expect(chatEditVerdict(edit({ reviewMode, spine: skipping, redDelta: 1 })).reason_vi, `${reviewMode} cờ đỏ`).toContain("1 cờ đỏ")
+    }
+  })
+
+  it("chatEditVerdict: chỉ chạm phần 'không hỏi lại' ⇒ tự ghi ở cả mức strict", () => {
+    const skipping = spineWith2({ skip_confirm_sections: ["fixed:2.1"] })
+    expect(chatEditVerdict(edit({ reviewMode: "strict", spine: skipping })).quiet).toBe(true)
+    expect(chatEditVerdict(edit({ reviewMode: "strict", spine: skipping, touchedSections: ["fixed:2.1", "fixed:3.1.2"] })).quiet).toBe(false)
   })
 })

@@ -1,0 +1,177 @@
+{
+ "FN005": {
+  "id": "FN005",
+  "name": "Cancel Appointment",
+  "trigger": "The patient clicks Cancel on an upcoming appointment in the mobile app.",
+  "description": "The appointment is cancelled, its time slot is freed, and the deposit is refunded or forfeited according to how close the appointment is.",
+  "normal": [
+   "The patient opens an upcoming appointment and selects Cancel.",
+   "The system shows the appointment and whether cancelling now is free or forfeits the deposit.",
+   "The patient confirms the cancellation.",
+   "The system cancels the appointment, releases its time slot and refunds the deposit if cancelled at least 4 hours ahead.",
+   "The system shows the appointment as cancelled with its deposit status: refunded or forfeited."
+  ],
+  "abnormal": [
+   "The appointment has already started or passed: the system rejects the cancellation and keeps the booking unchanged.",
+   "The appointment is less than 6 hours away: the system warns the patient that the deposit will be forfeited and asks for confirmation.",
+   "The deposit refund fails at the payment gateway: the system keeps the cancellation, queues the refund and tells the patient.",
+   "Another change already cancelled the appointment: the system shows it as cancelled and makes no further change.",
+   "The requester is not the patient who booked the appointment: the system refuses the cancellation and shows no appointment details."
+  ],
+  "validations": [
+   {
+    "id": "FN005-V1",
+    "kind": "required",
+    "statement": "An appointment must be selected before it can be cancelled."
+   },
+   {
+    "id": "FN005-V2",
+    "kind": "business",
+    "statement": "An appointment can be cancelled free of charge only at least 4 hours before its start time."
+   },
+   {
+    "id": "FN005-V3",
+    "kind": "business",
+    "statement": "A deposit is refunded when the appointment is cancelled in time and forfeited when cancelled later."
+   }
+  ],
+  "interactions": [
+   {
+    "from": "A04",
+    "to": "system",
+    "message": "Request to cancel appointment",
+    "kind": "request",
+    "flow": "normal"
+   },
+   {
+    "from": "system",
+    "to": "A04",
+    "message": "Reject cancellation as appointment already started",
+    "kind": "response",
+    "flow": "abnormal",
+    "guard": "appointment has already started or passed"
+   },
+   {
+    "from": "system",
+    "to": "A04",
+    "message": "Show deposit will be forfeited and ask for confirmation",
+    "kind": "response",
+    "flow": "abnormal",
+    "guard": "appointment is less than 6 hours away"
+   },
+   {
+    "from": "A04",
+    "to": "system",
+    "message": "Confirm cancellation",
+    "kind": "request",
+    "flow": "normal"
+   },
+   {
+    "from": "system",
+    "to": "A04",
+    "message": "Report refund queued after gateway failure",
+    "kind": "response",
+    "flow": "abnormal",
+    "guard": "deposit refund fails at payment gateway"
+   },
+   {
+    "from": "system",
+    "to": "A04",
+    "message": "Show cancelled appointment with deposit status",
+    "kind": "response",
+    "flow": "normal"
+   }
+  ],
+  "source_ref": "User answer: cancel at least 4 hours before is free"
+ },
+ "FN006": {
+  "id": "FN006",
+  "name": "Reschedule Appointment",
+  "trigger": "The receptionist, at the branch front desk, opens an appointment and chooses Reschedule.",
+  "description": "The appointment moves to a free slot of the same doctor and the old slot is released.",
+  "normal": [
+   "The receptionist finds the patient's appointment and chooses Reschedule.",
+   "The system shows the free slots of the same doctor across all six branches.",
+   "The receptionist picks a new slot and confirms the change.",
+   "The system checks that the slot is still free and that the change is at least 4 hours before the original time.",
+   "The system moves the appointment to the new slot, releases the old slot and shows the updated time."
+  ],
+  "abnormal": [
+   "The new slot was taken by another booking in the meantime: the system rejects the change and asks the receptionist to pick another slot.",
+   "The change is requested less than 6 hours before the original time: the system warns that the deposit is kept and moves the appointment only after the receptionist confirms.",
+   "The user has no update permission for the appointment: the Reschedule action is disabled and the appointment stays unchanged.",
+   "The appointment was already cancelled or completed: the system shows that it can no longer be changed and leaves it unchanged.",
+   "The 15-minute hold on the selected slot expires before confirmation: the system releases the slot and the receptionist must choose again.",
+   "The change notification to the patient fails: the appointment change is kept and the notification is retried from the queue."
+  ],
+  "validations": [
+   {
+    "id": "FN006-V1",
+    "kind": "required",
+    "statement": "A new slot must be selected before the change can be confirmed."
+   },
+   {
+    "id": "FN006-V2",
+    "kind": "business",
+    "statement": "A doctor's slot cannot be double-booked across all six branches."
+   },
+   {
+    "id": "FN006-V3",
+    "kind": "business",
+    "statement": "A change is free of charge only when made at least 4 hours before the original appointment time; a later change keeps the deposit."
+   },
+   {
+    "id": "FN006-V4",
+    "kind": "business",
+    "statement": "A slot selected for a change is held for 15 minutes before it is released."
+   }
+  ],
+  "interactions": [
+   {
+    "from": "A05",
+    "to": "system",
+    "message": "Search appointment and choose Reschedule",
+    "kind": "request",
+    "flow": "normal"
+   },
+   {
+    "from": "system",
+    "to": "A05",
+    "message": "Show free slots of the doctor across all branches",
+    "kind": "response",
+    "flow": "normal"
+   },
+   {
+    "from": "A05",
+    "to": "system",
+    "message": "Submit the new slot",
+    "kind": "request",
+    "flow": "normal"
+   },
+   {
+    "from": "system",
+    "to": "A05",
+    "message": "Reject the change because the new slot is already taken",
+    "kind": "response",
+    "flow": "abnormal",
+    "guard": "new slot is taken by another booking"
+   },
+   {
+    "from": "system",
+    "to": "A05",
+    "message": "Warn that the deposit is kept",
+    "kind": "response",
+    "flow": "abnormal",
+    "guard": "change is less than 6 hours before the appointment"
+   },
+   {
+    "from": "system",
+    "to": "A05",
+    "message": "Confirm the appointment has moved",
+    "kind": "response",
+    "flow": "normal"
+   }
+  ],
+  "source_ref": "User answer: receptionist reschedules at the counter"
+ }
+}

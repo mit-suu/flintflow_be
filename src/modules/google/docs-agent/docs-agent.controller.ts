@@ -9,7 +9,6 @@ import { ApiError } from "../../../shared/utils/api-error.js"
 import { toClientError } from "../../../shared/utils/client-error.js"
 import { validationError } from "../../../shared/utils/validation-message.js"
 import { HISTORY_MAX, applyPendingAction, dismissPendingAction, openAgentTurn, type AgentEvent } from "./docs-agent.service.js"
-import { googleDocNotInProject, isDocInProject } from "../google-doc-links.service.js"
 
 export const AgentMessageSchema = z.object({
   documentId: z.string().trim().min(1).max(200).regex(/^[\w-]+$/),
@@ -43,9 +42,6 @@ export const streamMessage = catchAsync(async (req: Request, res: Response) => {
   const parsed = AgentMessageSchema.safeParse(req.body ?? {})
   if (!parsed.success) throw validationError(parsed.error)
   const body = parsed.data
-  // Trợ lý chạy trong ngữ cảnh dự án ⇒ chỉ nhận Google Doc của dự án (đã xuất hoặc đã liên kết). Kiểm trước khi mở
-  // luồng: chưa giữ credit, lỗi trả JSON như endpoint thường
-  if (!(await isDocInProject(projectId, body.documentId))) throw googleDocNotInProject()
 
   // Nút dừng ở FE = huỷ fetch ⇒ ngắt lượt gọi model, hoàn credit (như chat)
   const stop = new AbortController()

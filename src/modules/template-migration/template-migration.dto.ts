@@ -5,7 +5,13 @@ const objectId = z.string().regex(/^[a-f0-9]{24}$/i, "Mã không hợp lệ.")
 const key = z.string().min(1).max(200)
 
 /** Bắt đầu bằng mẫu org: bất kỳ bản nào của họ mẫu (kể cả bản cũ hơn bản đang theo). */
-export const startFromTemplateSchema = z.strictObject({ template_id: objectId, version: z.number().int().min(1) })
+export const startFromTemplateSchema = z.strictObject({ kind: z.literal("template").optional(), template_id: objectId, version: z.number().int().min(1) })
+
+/**
+ * FLF-466: bắt đầu bằng **mẫu chuẩn FlintFlow** (đổi sang và đổi ngược về). `language` bỏ trống ⇒ ngôn ngữ tài liệu hiện tại của dự án;
+ * khác ngôn ngữ chữ trong Spine thì dự án có file nền dịch đè (báo credit trước), dự án chưa áp mẫu nào chỉ đổi ngôn ngữ tài liệu.
+ */
+export const startFromStandardSchema = z.strictObject({ kind: z.literal("standard"), language: z.enum(["vi", "en"]).optional() })
 
 /**
  * Bắt đầu bằng file mẫu tải lên (multipart — field chữ đi kèm `file`). Analyst: bản riêng của dự án. Lead: `publish_to_org = "true"`

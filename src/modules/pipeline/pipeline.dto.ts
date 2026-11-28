@@ -22,6 +22,7 @@ import {
   WAIVE_REASON_MIN_LENGTH
 } from "../spine/spine.schema.js"
 import { opSchema, userOpSchema } from "../spine/op.types.js"
+import { optionAnalysisSchema } from "../../shared/ai/option-analysis.js"
 import { COMMENT_ID_PATTERN, COMMENT_RESOLUTIONS, COMMENT_STATUSES, COMMENT_TEXT_MAX, KEEP_REASON_MIN_LENGTH } from "../comment/comment.model.js"
 import { ORG_ROLES } from "../organization/membership.model.js"
 import { NEW_CR_SOURCE_KINDS } from "../change-request/change-request.constants.js"
@@ -47,6 +48,9 @@ export const PIPELINE_ERROR_STATUS = {
   REGENERATE_LIMIT: 409,
   CALL_LIMIT: 409,
   STEP_NOT_RUNNABLE: 409,
+  /** FLF-466 P08: chưa xác nhận credit (sau Approve Brief / chốt danh sách màn / thêm màn) — `POST /run-estimate/ack` rồi chạy lại. */
+  CREDIT_ACK_REQUIRED: 409,
+  NO_CREDIT_ACK_PENDING: 409,
   NO_WORKING_DRAFT: 409,
   INVARIANT_VIOLATION: 422,
   OP_INVALID: 422,
@@ -175,7 +179,20 @@ export const changesPreviewResponseSchema = z.object({
   preview_id: z.string().optional(),
   notes: z.string().optional(),
   /** Hoà giải (BUG-16): không có gì cần đổi — gửi lại `preview_id` để xác nhận section nguyên trạng. */
-  no_change: z.boolean().optional()
+  no_change: z.boolean().optional(),
+  /** FLF-493 (hoà giải): mục lô op sẽ xoá (quy tắc, validation, phần tử…) — FE hiện khối đỏ trước khi áp. */
+  removed_items: z.array(z.object({ path: z.string(), label: z.string() })).optional(),
+  /** Nguyên tắc 6: AI thấy yêu cầu không hợp lý — không bao giờ tự ghi; "Vẫn làm" = áp `preview_id` như thường. */
+  warning: z.string().optional(),
+  /** Cờ đỏ mới mà bản sửa sẽ mở (Code tính trước / sau) — sửa này sẽ chặn baseline. */
+  predicted_red_flags: z.array(z.object({ rule_id: z.string(), section_id: z.string(), target_id: z.string().nullable(), message: z.string() })).optional(),
+  /** Phần AI tự đoán sau 2 lượt hỏi — đã ghi vào `spine.assumptions` (chưa xác nhận). */
+  assumptions: z.array(z.object({ statement: z.string(), statement_vi: z.string().optional() })).optional(),
+  /** Mức duyệt cho phép ⇒ đã ghi luôn (không còn `preview_id`), hoàn tác qua `/undo`. */
+  auto_applied: z.boolean().optional(),
+  applied_version: baseVersion.optional(),
+  /** Vì sao vẫn chờ xác nhận (Mọi bước, op xoá, cờ đỏ dự báo, cảnh báo, câu hỏi…). */
+  confirm_reason: z.string().optional()
 })
 
 /** POST /projects/:id/changes, /undo, /reconcile — kết quả một transaction đã ghi. */
@@ -334,11 +351,10 @@ export const gateTableSchema = z.object({
  * Một lựa chọn của thẻ hỏi (theo AskUserQuestion): `label` là thứ gửi lại qua `/answer`, `description` nói
  * chọn nó được/mất gì, `preview` là bản so sánh monospace (bố cục màn, cấu trúc bảng). Dạng `string` chỉ
  * còn để đọc run-state `waiting_answer` lưu trước khi đổi hợp đồng — server luôn phát dạng object.
+ * FLF-449 (N1): thêm `pros` / `cons` / `risks` (ưu / nhược / rủi ro-giả định, thiếu = rỗng) và `recommended` — đuôi
+ * " (Khuyến nghị)" trên `label` vẫn đi kèm cờ để client / run-state cũ đọc được.
  */
-export const questionOptionSchema = z.union([
-  z.string().min(1),
-  z.object({ label: z.string().min(1), description: z.string().optional(), preview: z.string().optional() })
-])
+export const questionOptionSchema = z.union([z.string().min(1), optionAnalysisSchema])
 
 export const questionSchema = z.object({
   id: z.string().min(1),
@@ -349,7 +365,9 @@ export const questionSchema = z.object({
   options: z.array(questionOptionSchema).optional(),
   multiple: z.boolean().optional(),
   /** Câu mở đã hỏi ngay trong lời AI (`elicit.delta`): FE không vẽ thẻ cho câu này, vẫn trả lời bằng ô chat. Thiếu ⇒ false. */
-  inline: z.boolean().optional()
+  inline: z.boolean().optional(),
+  /** FLF-449 (03 #3): vì sao khuyến nghị phương án có `recommended: true`. Không có phương án khuyến nghị ⇒ không có. */
+  recommendation_reason: z.string().optional()
 })
 
 /** Mỗi sự kiện SSE: `event: <type>` + `data: <JSON>` đúng schema dưới. */
@@ -374,7 +392,9 @@ export const stepEventSchema = z.discriminatedUnion("type", [
     label_vi: z.string(),
     detail_vi: z.string().optional(),
     batch: z.object({ i: z.number().int().min(1), n: z.number().int().min(1) }).optional(),
-    est_ms: z.number().int().min(0).optional()
+    est_ms: z.number().int().min(0).optional(),
+    /** Chỉ stage `draft` / `check` / `render`: id các mục tài liệu (`data-section-id`) do bước này sở hữu; không có ánh xạ ⇒ bỏ field. */
+    section_ids: z.array(z.string()).optional()
   }),
   z.object({ type: z.literal("heartbeat"), step_id: z.string(), stage: runStageSchema, elapsed_ms: z.number().int().min(0) }),
   z.object({ type: z.literal("auto_accepted"), step_id: z.string(), reason_vi: z.string() }),
@@ -506,7 +526,11 @@ export const gateResponseSchema = z.object({
   next_step: z.string().nullable(),
   spine_version: baseVersion,
   /** FLF-232: sau `revision`, lời AI xác nhận bằng chữ điều vừa sửa (từ `notes` của lượt soạn lại). Thiếu với accept/regenerate. */
-  message_vi: z.string().optional()
+  message_vi: z.string().optional(),
+  /** FLF-489: bước vừa duyệt đã từng được chốt trước lượt này (chạy lại bước đã qua, hoặc bước bị hoà giải mở lại). Client không tự chạy tiếp quy trình, trừ khi chính nó đang chạy liền cả giai đoạn. */
+  rerun: z.boolean().optional(),
+  /** FLF-482 (C2): lời sửa (một phần) nằm ngoài mục bước này ghi được ⇒ client mở Sửa tài liệu với đúng câu này (bản xem trước + Áp dụng). Chỉ có sau `revision`. */
+  route_to_change: z.object({ instruction: z.string() }).optional()
 })
 
 // ─── progress / flags ────────────────────────────────────────────
@@ -528,6 +552,8 @@ export const progressResponseSchema = z.object({
     current_step: z.string().nullable(),
     show_percent: z.boolean()
   }),
+  /** FLF-461: chế độ 3/4 đếm số mục còn cần xử lý thay vì 12 giai đoạn. Dự án khác ⇒ vắng / null. */
+  section_progress: z.object({ remaining: z.number().int().min(0), total: z.number().int().min(0) }).nullable().optional(),
   sections: z.array(
     z.object({
       id: z.string().min(1),
@@ -611,15 +637,45 @@ export const runEstimateQuerySchema = z.object({
   /** `unit`: chỉ đơn vị giai đoạn của bước đầu; `all`: tới hết pipeline (sau Approve Brief). */
   scope: z.enum(["unit", "all"]).default("all"),
   /** Id bước hoặc đơn vị giai đoạn (`S-4`, `S-5@S03`) để bắt đầu đếm; thiếu ⇒ bước tới lượt. */
-  from: z.string().min(1).optional()
+  from: z.string().min(1).optional(),
+  /** FLF-466 P08: lần báo cần tính; thiếu ⇒ theo `progress.credit_ack_required` nếu có. */
+  scope_kind: z.enum(["after_brief", "screens_locked", "screens_added", "reference_documents"]).optional()
+})
+
+export const creditAckRequiredSchema = z.object({
+  scope: z.enum(["after_brief", "screens_locked", "screens_added", "reference_documents"]),
+  credits: z.number().min(0),
+  created_at: z.string(),
+  screens: z.array(z.string()).optional(),
+  documents: z.number().int().min(0).optional()
+})
+
+export const screenRangeSchema = z.object({
+  min: z.number().int().min(0),
+  max: z.number().int().min(0),
+  credits_per_screen: z.number().min(0),
+  credits_min: z.number().min(0),
+  credits_max: z.number().min(0),
+  inputs: z.object({ goals: z.number().int(), other_requirements: z.number().int(), feature_notes: z.number().int(), total: z.number().int() }),
+  /** FLF-485: căn cứ của dải — ghi chú quy mô trong Brief hay đầu vào S-1. */
+  basis: z.enum(["scale_note", "inputs"]),
+  estimated: z.literal(true)
 })
 
 export const runEstimateUnitSchema = z.object({
   unit: z.string().min(1),
+  /** FLF-485 (#18): nhãn người dùng đọc được (tên màn / nhãn giai đoạn) để FE không hiện mã đơn vị. */
+  label: z.string(),
   steps: z.number().int().min(0),
   ai_steps: z.number().int().min(0),
   interview_credits: z.number().min(0),
-  credits: z.number().min(0)
+  /** Cận trên (= `credits_max`). */
+  credits: z.number().min(0),
+  /** FLF-485: cận dưới / cận trên; đơn vị chính xác thì bằng nhau, chỉ đơn vị S-5 ước tính mới khác. */
+  credits_min: z.number().min(0),
+  credits_max: z.number().min(0),
+  /** Khoảng số màn, chỉ có ở đơn vị S-5 ước tính (chưa có danh sách màn). */
+  screens: z.object({ min: z.number().int().min(0), max: z.number().int().min(0) }).optional()
 })
 
 export const runEstimateResponseSchema = z.object({
@@ -628,9 +684,27 @@ export const runEstimateResponseSchema = z.object({
   units: z.array(runEstimateUnitSchema),
   steps_total: z.number().int().min(0),
   ai_steps_total: z.number().int().min(0),
+  /** Cận trên (= `credits_max`). */
   credits_total: z.number().min(0),
+  credits_min: z.number().min(0),
+  credits_max: z.number().min(0),
+  /** `screens` = đã có màn (chính xác); còn lại là khoảng đoán theo use case / Brief / mặc định; null khi lượt chạy không đi qua vòng màn hình. */
+  screen_estimate: z
+    .object({ min: z.number().int().min(0), max: z.number().int().min(0), basis: z.enum(["screens", "use_cases", "brief", "default"]) })
+    .nullable(),
   /** `balance − reserved` của ví org sở hữu project; null khi không xác định được ví. */
-  available_credits: z.number().nullable()
+  available_credits: z.number().nullable(),
+  // FLF-466 P08 — chỉ thêm trường
+  scope_kind: z.enum(["after_brief", "screens_locked", "screens_added", "reference_documents"]).nullable(),
+  screen_range: screenRangeSchema.nullable(),
+  ack_required: creditAckRequiredSchema.nullable()
+})
+
+/** POST /projects/:id/run-estimate/ack — user xác nhận lần báo credit đang chờ (FLF-466 P08). */
+export const runEstimateAckResponseSchema = z.object({
+  scope: z.enum(["after_brief", "screens_locked", "screens_added", "reference_documents"]),
+  credits: z.number().min(0),
+  spine_version: z.number().int()
 })
 
 /** POST /projects/:id/steps/:stepId/cancel */
@@ -839,3 +913,43 @@ export const baselineRejectRequestSchema = z.strictObject({
 })
 
 export const baselineSubmissionResponseSchema = baselineSubmissionSchema
+
+// ─── Hàng việc chờ quyết + tài liệu tham khảo (FLF-443, endpoint 51–55) ──
+
+/**
+ * GET /projects/:id/pending-queue (51) — hàng việc chờ người quyết, Code xếp: loại việc → bước soạn sở hữu → section →
+ * phần tử. Chỉ thứ tự và danh tính: FE dựng câu hỏi / câu trích từ Spine đã tải. Chỉ đọc, không gọi model.
+ */
+export const pendingKindSchema = z.enum(["assumption", "brief_note", "screen", "flag_red", "flag_yellow_group"])
+export const pendingItemSchema = z.object({
+  /** `<kind>:<id>`; nhóm cờ vàng: `flag_yellow_group:<entity_path | rule_id@section_id>`. */
+  key: z.string().min(1),
+  kind: pendingKindSchema,
+  /** `false` chỉ với `flag_yellow_group` (không chặn, lượt chính khi hết việc chặn). */
+  blocking: z.boolean(),
+  owner_step: z.string().min(1),
+  section_id: z.string().nullable(),
+  /** Phần tử Spine đã chuẩn hoá `<collection>[id=X]`; không chuẩn hoá được ⇒ `null`. */
+  entity_path: z.string().nullable(),
+  /** Số việc khác cùng `entity_path` thuộc bước soạn sau; 0 ⇒ FE không hiện lý do xếp trước. */
+  dependents: z.number().int().min(0),
+  refs: z.object({
+    assumption_id: z.string().optional(),
+    addendum_id: z.string().optional(),
+    screen_id: z.string().optional(),
+    flag_ids: z.array(z.string()).optional()
+  })
+})
+export const pendingQueueResponseSchema = z.object({ total: z.number().int().min(0), items: z.array(pendingItemSchema) })
+
+/** GET /projects/:id/documents/:docId/text (52) — chữ tài liệu tham khảo, chia đoạn đúng mã `D<n>-P<mm>` của `GET /sources`. */
+export const referenceDocumentTextSchema = z.object({
+  id: z.string().min(1),
+  name: z.string(),
+  paragraphs: z.array(z.object({ para_id: z.string().min(1), text: z.string() }))
+})
+
+export type PendingKind = z.infer<typeof pendingKindSchema>
+export type PendingItem = z.infer<typeof pendingItemSchema>
+export type PendingQueue = z.infer<typeof pendingQueueResponseSchema>
+export type ReferenceDocumentText = z.infer<typeof referenceDocumentTextSchema>

@@ -42,13 +42,28 @@ const projectSchema = new Schema(
   opts
 )
 
+/** FLF-466 P08: lần báo credit chờ xác nhận (`progress.credit_ack_required`). */
+const creditAckSchema = new Schema(
+  {
+    scope: { type: String, enum: ["after_brief", "screens_locked", "screens_added", "reference_documents"], required: true },
+    credits: { type: Number, required: true, min: 0 },
+    created_at: { type: String, required: true },
+    screens: { type: [String], default: undefined },
+    documents: { type: Number, default: undefined, min: 0 }
+  },
+  opts
+)
+
 const progressSchema = new Schema(
   {
     current_phase: nullableString,
     current_step: nullableString,
     screen_cursor: nullableString,
     screen_queue: { type: [String], default: [] },
-    elicit_turns_this_phase: { type: Number, default: 0, min: 0 }
+    elicit_turns_this_phase: { type: Number, default: 0, min: 0 },
+    // FLF-466 P08: báo credit chờ xác nhận + màn đã xác nhận (dự án cũ không có)
+    credit_ack_required: { type: creditAckSchema, default: undefined },
+    credit_acked_screens: { type: [String], default: undefined }
   },
   opts
 )
@@ -85,7 +100,8 @@ const actorSchema = new Schema(
     description: { type: String, default: "" },
     flows_in: { type: [String], default: undefined },
     flows_out: { type: [String], default: undefined },
-    parent_id: { type: String, default: undefined }
+    parent_id: { type: String, default: undefined },
+    platforms: { type: [{ type: String, enum: ["web", "mobile"] }], default: undefined }
   },
   opts
 )
@@ -262,7 +278,8 @@ const functionSchema = new Schema(
     // FLF-418: sơ đồ tuần tự mức thành phần — cùng hình dạng message
     component_interactions: { type: [functionInteractionSchema], default: undefined },
     // FLF-365: bản phát hành (phân bổ yêu cầu) — thiếu = chưa phân bổ
-    release: { type: String, default: undefined }
+    release: { type: String, default: undefined },
+    source_ref: { type: String, default: undefined }
   },
   opts
 )
@@ -280,7 +297,8 @@ const nfrSchema = new Schema(
     metric: { type: String },
     threshold: { type: String },
     priority,
-    release: { type: String, default: undefined }
+    release: { type: String, default: undefined },
+    source_ref: { type: String, default: undefined }
   },
   opts
 )
@@ -290,7 +308,8 @@ const businessRuleSchema = new Schema(
     id: { type: String, required: true },
     tier: { type: String, enum: ["high", "detail"], required: true },
     statement: { type: String, default: "" },
-    source_validation_ids: { type: [String], default: [] }
+    source_validation_ids: { type: [String], default: [] },
+    source_ref: { type: String, default: undefined }
   },
   opts
 )
@@ -326,7 +345,9 @@ const otherRequirementSchema = new Schema(
       required: true
     },
     statement: { type: String, default: "" },
-    statement_vi: { type: String }
+    statement_vi: { type: String },
+    /** FLF-449: câu nguyên văn làm nảy ra mục (chỗ thiếu của Brief); không in vào SRS. */
+    source_quote: { type: String }
   },
   opts
 )
@@ -476,6 +497,7 @@ const flagSchema = new Schema(
     rule_id: { type: String, required: true },
     section_id: { type: String, required: true },
     target_id: nullableString,
+    lens: { type: String, default: undefined },
     message: { type: String, default: "" },
     remediation_step: { type: String, required: true },
     opened_at_version: { type: Number, required: true, min: 1 },

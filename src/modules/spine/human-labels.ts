@@ -45,6 +45,7 @@ export const FIELD_LABELS: Readonly<Record<string, string>> = {
   actor_id: "Tác nhân",
   actor_ids: "Tác nhân",
   parent_id: "Tác nhân cha",
+  platforms: "Nền tảng",
   function_ids: "Chức năng liên quan",
   includes: "Include",
   extends: "Extend",
@@ -158,25 +159,97 @@ export const humanizeText = (text: string): string => text.replace(PATH_IN_TEXT,
 type NamedElementSource = Partial<Pick<Spine, "screens" | "actors" | "roles" | "features" | "functions" | "entities">>
 const NAMED_COLLECTIONS = ["screens", "actors", "roles", "features", "functions", "entities"] as const
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+const idKey = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "")
+/** Tên dùng được để thay mã: không rỗng, không trùng mã (sau chuẩn hoá), không chứa mã - kẻo ra "BR-07 (BR-07)". */
+const usableName = (id: string, name: string | undefined | null): boolean => {
+  const n = name?.trim()
+  return !!n && idKey(n) !== idKey(id) && !n.toLowerCase().includes(id.toLowerCase())
+}
+/** "X (X)" (cùng chữ sau chuẩn hoá, có / không nháy) ⇒ "X". */
+const ECHO_PAIR = /(['"‘“][^'"’”\n]+['"’”]|[\p{L}\p{N}][\w.-]*)\s*\(\s*['"‘“]?([^'"’”()\n]+?)['"’”]?\s*\)/gu
+const collapseEcho = (text: string): string => text.replace(ECHO_PAIR, (m, first: string, again: string) => (idKey(first) === idKey(again) ? first : m))
 
 /**
  * Câu model viết cho người đọc (câu hỏi làm rõ khi sửa mục) mà vẫn chép mã phần tử: `S02` ⇒ `'Reset Password'`. Mã
  * trong ngoặc đứng ngay sau chính tên của nó (`'Login' (S01)`) thì bỏ hẳn. Mã use case (`UC-01`) là mã tài liệu nên
  * giữ; mã không có trong spine giữ nguyên.
  */
-export const nameElementIds = (text: string, spine: NamedElementSource): string => {
+export const nameElementIds = (text: string, spine: NamedElementSource, extra?: ReadonlyMap<string, string>): string => {
   const names = new Map<string, string>()
   for (const key of NAMED_COLLECTIONS) {
-    for (const el of spine[key] ?? []) if (el.name?.trim() && !names.has(el.id)) names.set(el.id, el.name.trim())
+    for (const el of spine[key] ?? []) if (usableName(el.id, el.name) && !names.has(el.id)) names.set(el.id, el.name!.trim())
   }
-  if (names.size === 0) return text
+  // FLF-474: tên của phần tử không có field `name` (mục riêng, quy tắc, thông báo…) do nơi gọi dựng sẵn (`internalElementNames`)
+  for (const [id, name] of extra ?? []) if (usableName(id, name) && !names.has(id)) names.set(id, name.trim())
+  if (names.size === 0) return collapseEcho(text)
   const alt = [...names.keys()].sort((a, b) => b.length - a.length).map(escapeRe).join("|")
   const quoted = (id: string) => `'${names.get(id)}'`
 
   const withoutEcho = text.replace(new RegExp(`\\s*\\((${alt})\\)`, "g"), (match, id: string, offset: number) =>
     text.slice(Math.max(0, offset - 80), offset).toLowerCase().includes(names.get(id)!.toLowerCase()) ? "" : ` ${quoted(id)}`
   )
-  return withoutEcho.replace(new RegExp(`['"‘“]?(?<![\\w.-])(${alt})(?![\\w-]|\\.\\d)['"’”]?`, "g"), (_m, id: string) => quoted(id))
+  return collapseEcho(withoutEcho.replace(new RegExp(`['"‘“]?(?<![\\w.-])(${alt})(?![\\w-]|\\.\\d)['"’”]?`, "g"), (_m, id: string) => quoted(id)))
+}
+
+/**
+ * FLF-480: lưới an toàn cho lời model viết cho người đọc (tin cổng) khi nó vẫn chép mã nội bộ của phần tử đã bị xoá nên
+ * không còn tên để thay ("Đã đóng 11 điểm còn mở (OR01, OR05 đến OR14)"). Dãy mã (cách nhau dấu phẩy / "và" / "đến" /
+ * "and" / "to") nằm trong ngoặc ⇒ bỏ cả ngoặc; nằm ngoài ngoặc ⇒ bỏ dãy. Mã tài liệu có gạch nối (`BR-75`, `UC-01`)
+ * không đụng tới.
+ */
+const CODE = String.raw`(?:OR|BR|MSG|CR|AD|AS|DC|FL|N|FN|CS|A|S|R|E|F)\d{2,3}`
+const CODE_RUN = String.raw`${CODE}(?:\s*(?:,|;|và|đến|tới|and|to|-)\s*${CODE})*`
+const PAREN_CODES = new RegExp(String.raw`\s*[(（]\s*${CODE_RUN}\s*[)）]`, "g")
+const BARE_CODES = new RegExp(String.raw`(?<![\w-])${CODE_RUN}(?![\w-])`, "g")
+export const stripInternalCodes = (text: string): string =>
+  text
+    .replace(PAREN_CODES, "")
+    .replace(BARE_CODES, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+
+/** Mã nội bộ do bộ cấp mã sinh (`BR07`, `MSG03`, `N02`), khác mã tài liệu có gạch nối (`BR-75`) là mã người đọc thấy trong tài liệu. */
+const INTERNAL_ID: Readonly<Record<string, RegExp>> = {
+  business_rules: /^BR\d+$/,
+  messages: /^M(?:SG)?-?\d+$/,
+  nfrs: /^N\d+$/,
+  // FLF-480: câu hỏi mở / yêu cầu khác (`OR10`) lộ trong lời chat và ghi chú xem trước
+  other_requirements: /^OR\d+$/,
+  common_requirements: /^CR\d+$/,
+  addendum: /^AD\d+$/,
+  assumptions: /^AS\d+$/
+}
+
+/**
+ * FLF-474: tên người đọc được cho phần tử mà `nameElementIds` không có field `name` để thay ("CS27" lộ ra trong câu hỏi làm
+ * rõ): mục riêng (`custom_sections`) ⇒ `customTitle(id)` (tiêu đề; phần nối tiêu đề rỗng do nơi gọi đặt tên theo mục chủ);
+ * quy tắc nghiệp vụ / thông báo / yêu cầu phi chức năng mang mã nội bộ ⇒ câu trích ngắn. Mã tài liệu (`BR-75`) giữ nguyên.
+ */
+export const internalElementNames = (
+  spine: Partial<Pick<Spine, "custom_sections" | "business_rules" | "messages" | "nfrs" | "other_requirements" | "common_requirements" | "addendum" | "assumptions">>,
+  customTitle?: (sectionId: string) => string
+): Map<string, string> => {
+  const out = new Map<string, string>()
+  for (const c of spine.custom_sections ?? []) {
+    const title = c.heading?.trim() || customTitle?.(`custom:${c.id}`)?.trim()
+    if (title) out.set(c.id, title)
+  }
+  const quoted: [keyof typeof INTERNAL_ID, readonly { id: string; statement?: string; statement_vi?: string | null; text?: string; content?: string }[]][] = [
+    ["business_rules", spine.business_rules ?? []],
+    ["messages", spine.messages ?? []],
+    ["nfrs", spine.nfrs ?? []],
+    ["other_requirements", spine.other_requirements ?? []],
+    ["common_requirements", spine.common_requirements ?? []],
+    ["addendum", spine.addendum ?? []],
+    ["assumptions", spine.assumptions ?? []]
+  ]
+  for (const [key, list] of quoted) {
+    for (const el of list) {
+      const quote = (el.statement_vi ?? el.statement ?? el.text ?? el.content ?? "").trim()
+      if (quote && INTERNAL_ID[key].test(el.id)) out.set(el.id, shortQuote(quote))
+    }
+  }
+  return out
 }
 
 /** Field tên của phần tử, theo thứ tự ưu tiên; phần tử không có tên (quy tắc, thông báo…) thì trích câu chính. */
@@ -185,7 +258,7 @@ const ELEMENT_TEXT_FIELDS = ["statement", "text", "description", "content"] as c
 /** Số ký tự tối đa của câu trích khi phần tử không có tên. */
 const ELEMENT_QUOTE_MAX = 60
 
-const shortQuote = (text: string): string => {
+export const shortQuote = (text: string): string => {
   const t = text.replace(/\s+/g, " ").trim()
   return t.length > ELEMENT_QUOTE_MAX ? `${t.slice(0, ELEMENT_QUOTE_MAX).trimEnd()}…` : t
 }
@@ -269,6 +342,7 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   orphan_screen: "Màn hình không nằm trong luồng nào",
   screen_no_actor: "Màn hình chưa có tác nhân nào dùng",
   orphan_actor: "Tác nhân chưa gắn use case",
+  actor_no_usecase: "Tác nhân không còn use case riêng",
   usecase_no_function: "Use case chưa gắn chức năng",
   screen_no_function: "Màn hình chưa có chức năng",
   empty_feature: "Tính năng chưa có màn hình hay chức năng",
@@ -292,6 +366,11 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   unresolved_many_to_many: "Quan hệ nhiều–nhiều chưa tách thực thể trung gian",
   template_section_absent: "Mẫu bắt buộc không có mục này",
   template_section_empty: "Mục của mẫu chưa có nội dung",
+  standard_section_missing: "Mẫu chuẩn FlintFlow có mục mà tài liệu chưa có",
+  duplicate_name: "Trùng tên hoặc mã",
+  vague_wording: "Yêu cầu dùng từ chưa rõ nghĩa",
+  source_missing: "Yêu cầu chưa ghi nguồn",
+  content_type_missing: "Thiếu loại nội dung theo chuẩn SRS",
   import_semantic: "AI phát hiện vấn đề nội dung",
   import_image_unread: "Ảnh chưa đọc được",
   import_unresolved_ref: "Quyền chưa khớp màn / vai trò",
@@ -300,6 +379,8 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   accepted_as_is: "Chấp nhận nguyên trạng",
   goal_not_covered: "Mục tiêu chưa được đáp ứng",
   cr_consistency: "Chưa nhất quán sau khi sửa",
+  cr_old_value_left: "Còn giá trị cũ sau khi sửa",
+  old_value_left: "Còn giá trị cũ trong phần tử",
   // luật kiểm đề xuất CR (3.7)
   unconcluded: "Chưa có kết luận",
   element_missing: "Phần tử không còn trong tài liệu",

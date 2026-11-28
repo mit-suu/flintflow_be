@@ -228,8 +228,26 @@ describe("draftOps retry", () => {
     expect(rejected.attempts.map((a) => a.errors[0]?.rule)).toEqual(["schema_invalid", "path_not_writable", "key_change_forbidden"])
     expect(rejected.lastOps).toEqual([{ op: "set", path: "actors[id=A01].id", value: "A77" }])
     expect(executor.mock.calls.every((c) => c[0] === "regenerate")).toBe(true)
+    // FLF-477: lượt parse lỗi không có usage (executor ném trước khi trả); hai lượt có kết quả mang logId
+    expect(rejected.usage.map((u) => u.attempt)).toEqual([2, 3])
     expect(applyAndSave).not.toHaveBeenCalled()
     expect(saveWithVersion).not.toHaveBeenCalled()
+  })
+
+  it("FLF-477: hết lượt vì sai luật ở cả 3 lượt ⇒ DraftRejectedError có usage 3 lượt và summary() đủ rule/path", async () => {
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([{ op: "set", path: "actors[id=A99].name", value: "Ghost" }]))
+    const err = await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(DraftRejectedError)
+    const rejected = err as DraftRejectedError
+    expect(rejected.usage).toHaveLength(3)
+    expect(rejected.usage.map((u) => u.attempt)).toEqual([1, 2, 3])
+    const summary = rejected.summary()
+    expect(summary).toHaveLength(3)
+    for (const a of summary) {
+      expect(a.ops_count).toBe(1)
+      expect(a.errors[0]).toMatchObject({ rule: "path_not_resolved", path: "actors[id=A99].name" })
+      expect(a.errors[0].message.length).toBeLessThanOrEqual(200)
+    }
   })
 
   it("FLF-243: tên use case sai luật cờ vàng ⇒ gửi lại model kèm lỗi; lượt sau đúng thì qua", async () => {
@@ -352,6 +370,47 @@ describe("draftOps retry", () => {
     expect(result.localized).toEqual(localized)
   })
 
+  describe("FLF-479 12b-1: chữ model viết mà thiếu localized ⇒ gửi lại model", () => {
+    const language = { locale: "vi" as const, source: "en" as const, glossary: [] }
+    const desc = "Owns the shop and manages bookings every day"
+    const op = { op: "set", path: "actors[id=A01].description", value: desc }
+    const okLocalized = [{ path: "actors[id=A01].description", value: "Chủ cửa hàng và quản lý lịch đặt mỗi ngày" }]
+
+    it("lượt 1 không có localized ⇒ lượt 2 nhận lỗi localized_missing; lượt 2 đủ thì qua", async () => {
+      const executor = vi.fn<DraftExecutor>().mockResolvedValueOnce(reply([op])).mockResolvedValueOnce(reply([op], { localized: okLocalized }))
+      const result = await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor, documentLanguage: language })
+      expect(result.attempts.map((a) => a.errors[0]?.rule)).toEqual(["localized_missing", undefined])
+      expect(result.attempts[0].errors[0]).toMatchObject({ path: "actors[id=A01].description", op_index: 0 })
+      expect(executor.mock.calls[1][1].promptVariables).toMatchObject({ validation_errors: [{ rule: "localized_missing" }] })
+      expect(result.localized).toEqual(okLocalized)
+    })
+
+    it("model chép nguyên câu Anh vẫn bị coi là thiếu", async () => {
+      const copied = [{ path: "actors[id=A01].description", value: desc }]
+      const executor = vi.fn<DraftExecutor>().mockResolvedValueOnce(reply([op], { localized: copied })).mockResolvedValueOnce(reply([op], { localized: okLocalized }))
+      const result = await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor, documentLanguage: language })
+      expect(result.attempts[0].errors[0]?.rule).toBe("localized_missing")
+    })
+
+    it("lượt cuối vẫn nhận lô dù thiếu localized; tên ngắn không bị bắt", async () => {
+      const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([op]))
+      const result = await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor, documentLanguage: language })
+      expect(executor).toHaveBeenCalledTimes(3)
+      expect(result.txn?.ops).toEqual([op])
+      expect(result.attempts.map((a) => a.errors.length)).toEqual([1, 1, 0])
+
+      const short = vi.fn<DraftExecutor>().mockResolvedValue(reply([{ op: "set", path: "actors[id=A01].name", value: "Owner" }]))
+      await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor: short, documentLanguage: language })
+      expect(short).toHaveBeenCalledTimes(1)
+    })
+
+    it("không có documentLanguage ⇒ không kiểm", async () => {
+      const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([op]))
+      await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor })
+      expect(executor).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it("FLF-265 D16: documentLanguage null / thiếu ⇒ input không có field (prompt như cũ), kết quả không có localized", async () => {
     const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([{ op: "set", path: "actors[id=A01].name", value: "Owner" }]))
     const a = await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor, documentLanguage: null })
@@ -406,6 +465,69 @@ describe("draftOps - S-1.1 dựng lại tầm nhìn/mục tiêu từ addendum l�
   })
 })
 
+describe("draftOps - S-1.4 chỗ thiếu của Brief phải có câu trích thật (FLF-449 việc 16)", () => {
+  const gapSpine = (): Spine => ({
+    ...structuredClone(FIXTURE),
+    addendum: [
+      { id: "AD1", topic: "scope", content: "Khách thanh toán online qua ví điện tử.", content_en: "Customers pay online with an e-wallet.", target_section: "fixed:1", captured_at: "2026-11-23T00:00:00.000Z" }
+    ],
+    steps: FIXTURE.steps.map((s) => (s.id === "S-1.4" ? { ...s, status: "in_progress" as const } : s))
+  })
+  const gap = (id: string, statement: string, source_quote?: string) => ({
+    op: "add",
+    path: "other_requirements[]",
+    value: { id, kind: "open_question", statement, ...(source_quote !== undefined ? { source_quote } : {}) },
+    reason: "S-1.4 gap"
+  })
+
+  it("giữ chỗ thiếu trích đúng Brief (lời gốc) hoặc tài liệu; bỏ chỗ thiếu trích bịa hoặc không trích, không tốn lượt thử", async () => {
+    const spine = gapSpine()
+    const ctx = { ...ctxFor(spine, "S-1.4"), documents: "[D1-P02] Refunds above 2,000,000 VND need the manager's approval." }
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(
+      reply([
+        gap("OR06", "Which payment gateway is used, and what happens when a payment fails?", "thanh toán online qua ví điện tử"),
+        gap("OR07", "Who approves refunds below the manager threshold?", "Refunds above 2,000,000 VND need the manager's approval"),
+        gap("OR08", "How long are booking records kept?", "Customers must be able to export their data"),
+        gap("OR09", "What runs on a schedule?")
+      ])
+    )
+    const result = await draftOps("p", "S-1.4", ctx, { userId: "u", spine, executor })
+    expect(executor).toHaveBeenCalledTimes(1)
+    const values = (result.txn?.ops ?? []).map((op) => op.value as { id: string; source_quote?: string })
+    expect(values.map((v) => v.id)).toEqual(["OR06", "OR07"])
+    expect(values[0].source_quote).toBe("thanh toán online qua ví điện tử")
+  })
+
+  it("mọi chỗ thiếu đều trích bịa ⇒ không ghi gì (txn null), không lỗi", async () => {
+    const spine = gapSpine()
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([gap("OR06", "Which payment gateway?", "customers pay by credit card")]))
+    const result = await draftOps("p", "S-1.4", ctxFor(spine, "S-1.4"), { userId: "u", spine, executor })
+    expect(result.txn).toBeNull()
+  })
+
+  it("lượt sửa: câu trích lấy từ yêu cầu sửa của user được nhận", async () => {
+    const spine = gapSpine()
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([gap("OR06", "Which languages must the receipts support?", "hoá đơn cần cả tiếng Anh")]))
+    const result = await draftOps("p", "S-1.4", ctxFor(spine, "S-1.4"), { userId: "u", spine, executor, callKind: "revision", revisionRequest: "Thêm câu hỏi: hoá đơn cần cả tiếng Anh không?" })
+    expect(result.txn?.ops).toHaveLength(1)
+  })
+
+  it("prompt S-1.4 thấy lời gốc của addendum (content) bên cạnh content_en", async () => {
+    const spine = gapSpine()
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([]))
+    await draftOps("p", "S-1.4", ctxFor(spine, "S-1.4"), { userId: "u", spine, executor })
+    const vars = executor.mock.calls[0][1].promptVariables as { addendum: { content?: string; content_en: string }[] }
+    expect(vars.addendum[0]).toMatchObject({ content: "Khách thanh toán online qua ví điện tử.", content_en: "Customers pay online with an e-wallet." })
+  })
+
+  it("bước khác (S-1.3) không bị lọc: open_question không trích vẫn ghi", async () => {
+    const spine = { ...gapSpine(), steps: FIXTURE.steps.map((s) => (s.id === "S-1.3" ? { ...s, status: "in_progress" as const } : s)) }
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([gap("OR06", "Mobile first or a desktop dashboard?")]))
+    const result = await draftOps("p", "S-1.3", ctxFor(spine, "S-1.3"), { userId: "u", spine, executor })
+    expect(result.txn?.ops).toHaveLength(1)
+  })
+})
+
 describe("contentGuidance - FLF-370 reference khai ở prompt_references vào prompt", () => {
   it("S-3.x (actors-and-usecases) kèm nguyên actor-rules sau thân skill", () => {
     const guidance = contentGuidance({ skill: "actors-and-usecases" })
@@ -418,5 +540,70 @@ describe("contentGuidance - FLF-370 reference khai ở prompt_references vào pr
   it("skill không khai prompt_references ⇒ chỉ thân skill", () => {
     expect(contentGuidance({ skill: "screens-and-flow" })).not.toContain("## Reference:")
     expect(contentGuidance({ skill: null })).toBe("")
+  })
+})
+
+describe("draftOps - trả lời câu hỏi mở ở cổng (FLF-472)", () => {
+  const openSpine = (): Spine => ({
+    ...structuredClone(FIXTURE),
+    other_requirements: [
+      { id: "OR10", kind: "open_question", statement: "How long are patient records kept before they are anonymised?", statement_vi: "Hồ sơ bệnh nhân giữ bao lâu thì ẩn danh?", source_quote: "x" },
+      { id: "OR11", kind: "open_question", statement: "How many hours ahead may a patient reschedule?", statement_vi: "Đổi lịch trước tối thiểu mấy giờ?", source_quote: "y" }
+    ],
+    steps: FIXTURE.steps.map((s) => (s.id === "S-1.4" ? { ...s, status: "in_progress" as const } : s))
+  })
+  const remove = (id: string) => ({ op: "remove", path: `other_requirements[id=${id}]`, reason: "User trả lời" })
+  const aq = (id: string, answer: string) => ({ id, answer, question: undefined, topic_key: undefined })
+
+  it("đóng câu hỏi kèm answered_questions ⇒ có op add decisions[] mang đúng câu trả lời (khoá open_question:*)", async () => {
+    const spine = openSpine()
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(
+      reply([remove("OR10"), remove("OR11")], { answered_questions: [aq("OR10", "10 năm rồi ẩn danh họ tên, SĐT"), aq("OR11", "Đổi lịch trước ít nhất 4 tiếng")] })
+    )
+    const result = await draftOps("p", "S-1.4", ctxFor(spine, "S-1.4"), { userId: "u", spine, executor, callKind: "revision", revisionRequest: "OR10: 10 năm ..." })
+    const decisions = (result.txn?.ops ?? []).filter((op) => op.op === "add" && op.path === "decisions[]").map((op) => op.value as { topic_key: string; question: string; answer: string; step_id: string })
+    expect(decisions).toHaveLength(2)
+    expect(decisions[0]).toMatchObject({ topic_key: "open_question:how_long_are_patient_records_kept_before_they_are_anonymised", question: "Hồ sơ bệnh nhân giữ bao lâu thì ẩn danh?", answer: "10 năm rồi ẩn danh họ tên, SĐT", step_id: "S-1.4" })
+    expect(decisions[1].answer).toBe("Đổi lịch trước ít nhất 4 tiếng")
+    expect(() => planTransaction(spine, result.txn!, { startSeq: 1 })).not.toThrow()
+  })
+
+  it("revision xoá câu hỏi mở mà không kèm câu trả lời ⇒ open_question_closed_without_answer (3 lượt rồi từ chối)", async () => {
+    const spine = openSpine()
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([remove("OR10")]))
+    const err = await draftOps("p", "S-1.4", ctxFor(spine, "S-1.4"), { userId: "u", spine, executor, callKind: "revision", revisionRequest: "10 năm" }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(DraftRejectedError)
+    expect((err as DraftRejectedError).errors.map((e) => e.rule)).toContain("open_question_closed_without_answer")
+  })
+
+  it("thiếu câu trả lời cho một trong hai câu ⇒ lượt sau gửi lại thì nhận", async () => {
+    const spine = openSpine()
+    const executor = vi
+      .fn<DraftExecutor>()
+      .mockResolvedValueOnce(reply([remove("OR10"), remove("OR11")], { answered_questions: [aq("OR10", "10 năm")] }))
+      .mockResolvedValueOnce(reply([remove("OR10"), remove("OR11")], { answered_questions: [aq("OR10", "10 năm"), aq("OR11", "4 tiếng")] }))
+    const result = await draftOps("p", "S-1.4", ctxFor(spine, "S-1.4"), { userId: "u", spine, executor, callKind: "revision", revisionRequest: "x" })
+    expect(result.attempts).toHaveLength(2)
+    expect(result.txn?.ops.filter((op) => op.path === "decisions[]")).toHaveLength(2)
+  })
+
+  it("câu trả lời tự do (id null) lưu theo khoá chuẩn, kể cả khi lô không có op nào khác", async () => {
+    const spine = openSpine()
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([], { answered_questions: [{ id: null, question: "Còn ai khác dùng hệ thống không?", topic_key: "roles", answer: "Đủ rồi, như mình kể" }] }))
+    const result = await draftOps("p", "S-1.4", ctxFor(spine, "S-1.4"), { userId: "u", spine, executor, callKind: "revision", revisionRequest: "đủ rồi" })
+    expect(result.txn?.ops).toHaveLength(1)
+    expect(result.txn?.ops[0].value).toMatchObject({ topic_key: "roles", answer: "Đủ rồi, như mình kể", step_id: "S-1.4" })
+  })
+
+  it("câu hỏi mới không dùng lại mã đã xoá ở lượt trước ⇒ đổi sang mã tạm, server cấp mã kế tiếp", async () => {
+    const spine = { ...openSpine(), other_requirements: [] }
+    const add = (id: string) => ({ op: "add", path: "other_requirements[]", value: { id, kind: "open_question", statement: "Which reports does the branch manager need?", source_quote: "branch manager reports weekly" }, reason: "gap" })
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([add("OR10")]))
+    const retiredLoader = vi.fn(async () => new Map([["other_requirements", ["OR10"]]]))
+    const result = await draftOps("p", "S-1.4", { ...ctxFor(spine, "S-1.4"), documents: "[D1-P01] The branch manager reports weekly." }, { userId: "u", spine, executor, retiredLoader })
+    const added = (result.txn?.ops ?? []).filter((op) => op.path === "other_requirements[]")
+    expect(retiredLoader).toHaveBeenCalledTimes(1)
+    expect(added).toHaveLength(1)
+    expect((added[0].value as { id: string }).id).toBe("$new_OR10")
   })
 })

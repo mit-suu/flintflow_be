@@ -20,24 +20,29 @@
 
 import { withMeteredAi, type MeteredResult } from "../import/metered-ai.js"
 import { ownerStepOf } from "../spine/section-registry.js"
-import { draftUseCaseOps, type ChangeExecutor, type ResolvedOps } from "../spine/change.service.js"
+import { draftUseCaseOps, type ChangeExecutor, type ResolvedOps, type StructuralHint } from "../spine/change.service.js"
 import { TransactionRejectedError, planTransaction } from "../spine/op-engine.js"
 import { userOpSchema, type Op } from "../spine/op.types.js"
 import type { Spine } from "../spine/spine.types.js"
 import { useCaseIntent, type UseCaseIntent } from "../spine/use-case-propagation.js"
+import { crStructuralIntent, structuralRequest } from "./structural-intent.js"
+import { linkFunctionsToUseCases } from "./function-use-case-link.js"
 import type { ChangeInstructionOutput } from "../../shared/ai/response-parser.js"
 import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import { ChangeLocation, type IChangeLocation } from "./change-location.model.js"
 import { formatLocationId } from "./cr-impact.service.js"
 import { answersText } from "./cr-context.js"
-import { SECTION_FILL_ARRAYS, addedElements, elementPathOf, elementValue, isArrayPath, originalDiagramLocations, sectionOfElement, snapshotOf, valueText } from "./spine-location.js"
+import { MAX_REMOVED_MENTIONS, SECTION_FILL_ARRAYS, addedElements, removedMentionLocations, elementPathOf, elementValue, isArrayPath, originalDiagramLocations, sectionOfElement, snapshotOf, valueText } from "./spine-location.js"
 
 /** Lý do của vị trí do lô thêm / xoá use case soạn — nhận ra để không soạn lại ở vòng đề xuất sau. */
 export const ADD_USE_CASE_REASON = "Thêm use case kèm chức năng, màn, luồng màn và phân quyền liên quan"
 export const REMOVE_USE_CASE_REASON = "Xoá use case kèm chức năng, màn và thông báo chỉ thuộc nó"
 export const EDIT_USE_CASE_REASON = "Sửa use case kèm chức năng, màn, phân quyền và thông báo của nó"
-const BUNDLE_REASONS = new Set([ADD_USE_CASE_REASON, REMOVE_USE_CASE_REASON, EDIT_USE_CASE_REASON])
+/** FLF-469: CR thêm / xoá cả một chức năng (không nhắc use case) đi cùng đường soạn lô. */
+export const ADD_FUNCTION_REASON = "Thêm chức năng kèm màn, thông báo và phần liên quan"
+export const REMOVE_FUNCTION_REASON = "Xoá chức năng kèm màn, thông báo và phần chỉ thuộc nó"
+const BUNDLE_REASONS = new Set([ADD_USE_CASE_REASON, REMOVE_USE_CASE_REASON, EDIT_USE_CASE_REASON, ADD_FUNCTION_REASON, REMOVE_FUNCTION_REASON])
 const REASON_OF: Readonly<Record<UseCaseIntent, string>> = { add: ADD_USE_CASE_REASON, remove: REMOVE_USE_CASE_REASON, edit: EDIT_USE_CASE_REASON }
 const VERB_OF: Readonly<Record<UseCaseIntent, string>> = { add: "thêm", remove: "xoá", edit: "sửa" }
 
@@ -50,6 +55,14 @@ type CrText = Pick<IChangeRequest, CrTextKey>
 
 /** CR thêm / xoá / sửa use case (động từ đứng trước thắng — như chat); không đụng use case ⇒ `null`. */
 export const crUseCaseIntent = (cr: CrText): UseCaseIntent | null => useCaseIntent(requesterText(cr))
+
+/** FLF-469: ý của lô soạn gộp - use case (như cũ) hoặc, khi CR không nhắc use case, thêm / xoá cả chức năng / màn. */
+export const crBatchIntent = (cr: CrText & Partial<Pick<IChangeRequest, "targets">>): { intent: UseCaseIntent; structural: boolean } | null => {
+  const uc = crUseCaseIntent(cr)
+  if (uc) return { intent: uc, structural: false }
+  const structural = crStructuralIntent(cr)
+  return structural ? { intent: structural, structural: true } : null
+}
 
 export const crAddsUseCase = (cr: CrText): boolean => crUseCaseIntent(cr) === "add"
 
@@ -151,7 +164,8 @@ export const proposeUseCaseBatch = async (
   locations: readonly IChangeLocation[],
   deps: { changeExecutor?: ChangeExecutor } = {}
 ): Promise<UseCaseBatchOutcome> => {
-  const intent = crUseCaseIntent(cr)
+  const batchIntent = crBatchIntent(cr)
+  const intent = batchIntent?.intent
   if (!intent || locations.some((l) => l.reason !== null && BUNDLE_REASONS.has(l.reason))) return "skipped"
   const answers = answersText(cr)
   const instruction = [cr.title, cr.description, ...(cr.amendments ?? []).map((a) => a.text), answers && answers !== "(none)" ? answers : ""].filter(Boolean).join("\n")
@@ -159,10 +173,17 @@ export const proposeUseCaseBatch = async (
   // Bản xem trước người dùng đã duyệt trong chat (vòng hỏi đáp như trước baseline: màn riêng / popup, ai xử lý, giữ / bỏ
   // use case đề xuất, xoá cả luồng) ⇒ dùng đúng lô đó, không soạn lại. Lô không còn áp được (tài liệu đã đổi) ⇒ soạn lại.
   const seeded = approvedBatch(spine, cr)
-  const outcome = seeded ? { drafted: { ops: [], clarification: null, notes: null } as ResolvedOps, batch: seeded } : await draftBatch(cr, userId, spine, instruction, intent, deps)
+  // FLF-469: CR thêm / xoá cả chức năng ⇒ bật luật 3i / 3j (gắn use case có sẵn, use case hết chức năng thì xoá)
+  const request = batchIntent.structural ? structuralRequest(cr) : null
+  const hint: StructuralHint | undefined = request?.collection === "functions" ? { intent: request.intent, collection: request.collection } : undefined
+  const outcome = seeded ? { drafted: { ops: [], clarification: null, notes: null } as ResolvedOps, batch: seeded } : await draftBatch(cr, userId, spine, instruction, intent, deps, hint)
   if (outcome === "paused" || outcome === "skipped") return outcome
   const { drafted, batch } = outcome
-  return attachBatch(cr, spine, locations, intent, drafted, batch)
+  // Lưới an toàn: model sót thì code gắn chức năng mới vào use case đoán được / xoá use case vừa hết chức năng
+  const fix = hint ? linkFunctionsToUseCases(spine, batch.after, hint.intent) : null
+  const fixed = fix?.ops.length ? concreteBatch(spine, [...batch.ops, ...fix.ops]) : null
+  const notes = fix ? (fixed || !fix.ops.length ? fix.notes : fix.notes.filter((n) => n.startsWith("Chức năng"))) : []
+  return attachBatch(cr, spine, locations, intent, drafted, fixed ?? batch, batchIntent.structural, notes)
 }
 
 /** Lô của bản xem trước đính kèm CR (`seed.ops`, đã chuẩn hoá ở bước xem trước) sau khi chạy khô; không có / sai ⇒ `null`. */
@@ -202,7 +223,8 @@ const draftBatch = async (
   spine: Spine,
   instruction: string,
   intent: UseCaseIntent,
-  deps: { changeExecutor?: ChangeExecutor }
+  deps: { changeExecutor?: ChangeExecutor },
+  structural?: StructuralHint
 ): Promise<{ drafted: ResolvedOps; batch: { ops: Op[]; after: Spine } } | "paused" | "skipped"> => {
   const projectId = String(cr.projectId)
   let drafted: ResolvedOps
@@ -211,7 +233,7 @@ const draftBatch = async (
       changeExecutor: deps.changeExecutor ?? meteredExecutor(projectId, userId, `C-4:${cr.cr_id}`),
       // Chữ CR ghi vào Spine là tiếng Anh như mọi lượt C-4 — không xin bản dịch kèm lô
       documentLanguage: async () => null
-    })
+    }, structural ? { structural } : {})
   } catch (err) {
     if (!(err instanceof MeteredCallFailed)) throw err
     if (err.result.reason === "credits") {
@@ -219,13 +241,13 @@ const draftBatch = async (
       await cr.save()
       return "paused"
     }
-    console.warn(`[C-4] ${cr.cr_id}: soạn lô ${VERB_OF[intent]} use case lỗi (${err.message}) - đề xuất theo từng vị trí`)
+    console.warn(`[C-4] ${cr.cr_id}: soạn lô ${VERB_OF[intent]} ${structural ? "chức năng" : "use case"} lỗi (${err.message}) - đề xuất theo từng vị trí`)
     return "skipped"
   }
   if (drafted.clarification || !drafted.ops.length) return "skipped"
   const batch = concreteBatch(spine, drafted.ops)
   if (!batch) {
-    console.warn(`[C-4] ${cr.cr_id}: lô ${VERB_OF[intent]} use case không áp thử được - đề xuất theo từng vị trí`)
+    console.warn(`[C-4] ${cr.cr_id}: lô ${VERB_OF[intent]} ${structural ? "chức năng" : "use case"} không áp thử được - đề xuất theo từng vị trí`)
     return "skipped"
   }
   return { drafted, batch }
@@ -238,7 +260,9 @@ const attachBatch = async (
   locations: readonly IChangeLocation[],
   intent: UseCaseIntent,
   drafted: ResolvedOps,
-  batch: { ops: Op[]; after: Spine }
+  batch: { ops: Op[]; after: Spine },
+  structural = false,
+  extraNotes: readonly string[] = []
 ): Promise<UseCaseBatchOutcome> => {
   const bundle = distributeOps(spine, batch.after, batch.ops)
   const byPath = new Map(locations.map((l) => [l.path, l]))
@@ -263,17 +287,23 @@ const attachBatch = async (
     if (byPath.has(d.path)) continue
     byPath.set(d.path, await ChangeLocation.create({ projectId: cr.projectId, cr_id: cr.cr_id, location_id: formatLocationId(++next), ...d, vector_score: null }))
   }
+  // FLF-469 (D): phần tử lô xoá còn được nhắc trong văn xuôi / đoạn nguyên văn (mã, tên, tên ngắn) ⇒ vị trí `mention`, đi
+  // qua bước đề xuất như thường (cr-propose luật 18). Phần tử có sẵn trong CR thì thôi
+  for (const m of removedMentionLocations(spine, batch.after, new Set(byPath.keys()), MAX_REMOVED_MENTIONS)) {
+    byPath.set(m.path, await ChangeLocation.create({ projectId: cr.projectId, cr_id: cr.cr_id, location_id: formatLocationId(++next), ...m, vector_score: null }))
+  }
   // Ghi chú của lô (phần còn thiếu FLF-298 / phần còn sót khi xoá) và use case AI tự đề xuất thêm (luật 3e — chat trước
   // baseline hỏi giữ / bỏ, CR không có lượt hỏi đó) ⇒ giả định của vị trí use case để Lead xác nhận khi duyệt
   const notes = [
     ...(drafted.notes?.trim() ? [drafted.notes.trim()] : []),
+    ...extraNotes,
     ...(drafted.proposed ?? []).map((name) => `AI đề xuất thêm use case "${name}" để luồng có người xử lý / theo dõi - bỏ nếu không cần`)
   ]
-  const noteHolder = bundle.find((b) => b.path === "use_cases[]") ?? bundle.find((b) => b.path.startsWith("use_cases[id="))
+  const noteHolder = bundle.find((b) => b.path === "use_cases[]") ?? bundle.find((b) => b.path.startsWith("use_cases[id=")) ?? bundle.find((b) => b.path === "functions[]") ?? bundle.find((b) => b.path.startsWith("functions[id="))
   for (const b of bundle) {
     const loc = byPath.get(b.path)!
     loc.conclusion = "edit"
-    loc.reason = REASON_OF[intent]
+    loc.reason = structural && intent !== "edit" ? (intent === "add" ? ADD_FUNCTION_REASON : REMOVE_FUNCTION_REASON) : REASON_OF[intent]
     loc.proposal = {
       proposed_at: new Date(),
       ...snapshotOf(spine, b.path),

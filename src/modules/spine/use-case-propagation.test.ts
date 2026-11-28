@@ -7,7 +7,7 @@ import { planTransaction } from "./op-engine.js"
 import type { Op } from "./op.types.js"
 import type { Spine } from "./spine.types.js"
 import { editIssues, editNote, editProblemText, removalLeftovers, removalNote, removalProblemText, removesUseCaseOrScreen, useCaseEditContext, useCaseIntent } from "./use-case-propagation.js"
-import { addedScreenIds, addsUseCaseOrScreen, declareTempIds, newUseCaseScreenIssues, useCaseScreenNote, useCaseScreenProblemText, wantsSharedScreen, isAddUseCaseInstruction, normalizeUseCaseBatch, useCaseContext, useCaseMode, useCaseOverlapNote, useCaseOverlaps, applyScreenKind, screenKindChoice, screenKindQuestion, askedList, askedUseCases, confirmedProposals, parseUiAnswer, uiPlanFor, uiPlanForModel, applyUiPlan, uiPlanIssues, uiPlanNote, uiPlanProblemText } from "./use-case-propagation.js"
+import { addedScreenIds, addsUseCaseOrScreen, declareTempIds, newUseCaseScreenIssues, useCaseScreenNote, useCaseScreenProblemText, wantsSharedScreen, isAddUseCaseInstruction, normalizeUseCaseBatch, useCaseContext, useCaseMode, useCaseOverlapNote, useCaseOverlaps, applyScreenKind, screenKindChoice, screenKindQuestion, askedList, askedUseCases, confirmedProposals, parseUiAnswer, uiPlanFromModel, uiPlanFor,uiPlanForModel, applyUiPlan, uiPlanIssues, uiPlanNote, uiPlanProblemText } from "./use-case-propagation.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 /** Fixture 19 màn: S-9, mọi bước accepted. */
@@ -447,7 +447,7 @@ describe("kế hoạch giao diện theo từng use case / từng màn - nhiều 
     const ops = multiOps().filter((o) => !(o.path === "use_cases[]" && (o.value as { name: string }).name !== "Request Grade Review"))
     const ask = screenKindQuestion(FIXTURE, ops)!
     expect(ask.text).toContain('1. "Request Grade Review" (Business Analyst) - màn mới: "Select Course" → "Enter Reason" → "Confirm Request"')
-    expect(ask.choices[0]).toBe("Mỗi use case một màn hình riêng")
+    expect(ask.choices[0]).toBe("Mỗi bước một màn riêng") // FLF-486 B4: một use case ⇒ nói về bước
   })
 
   it("askedList: đọc lại câu hỏi gần nhất - tên, nhóm đề xuất, màn dự kiến", () => {
@@ -483,6 +483,37 @@ describe("kế hoạch giao diện theo từng use case / từng màn - nhiều 
       { index: 2, kind: "popup", group: undefined, screen: "Dashboard", drop: undefined, merge: undefined, popupScreens: undefined },
       { index: 3, kind: "existing", group: undefined, screen: "Class List", drop: undefined, merge: undefined, popupScreens: undefined }
     ])
+  })
+
+  it("parseUiAnswer: phủ định - 'không bỏ', 'không cần popup' không phải lệnh bỏ; chữ 'chung' trơn không phải dùng chung", () => {
+    expect(pick(parseUiAnswer("1 màn riêng, không bỏ 3", ASKED)).filter((e) => e.index === 3)).toEqual([
+      { index: 3, kind: undefined, group: undefined, screen: undefined, drop: false, merge: undefined, popupScreens: undefined }
+    ])
+    expect(parseUiAnswer("2 không cần popup, làm màn riêng", ASKED).find((e) => e.index === 2)).toMatchObject({ kind: "own" })
+    expect(parseUiAnswer("2 không cần popup, làm màn riêng", ASKED).find((e) => e.index === 2)?.drop).toBeUndefined()
+    expect(parseUiAnswer("Không bỏ các use case AI đề xuất, mỗi cái màn riêng", ASKED).every((e) => !e.drop)).toBe(true)
+    expect(parseUiAnswer("Nói chung là mỗi use case một màn riêng", ASKED).every((e) => e.kind === "own")).toBe(true)
+  })
+
+  it("uiPlanFromModel: nhận mục của model khi số thuộc danh sách đã hỏi; giữ mục use case đề xuất model không nhắc", () => {
+    const plan = uiPlanFromModel(
+      [
+        { index: 1, ui: "popup", screen: " Dashboard " },
+        { index: 3, drop: true, ui: "own" },
+        { index: 2, ui: "shared" },
+        { index: 9, drop: true }
+      ],
+      ASKED
+    )
+    expect(pick(plan!)).toEqual([
+      { index: 1, kind: "popup", group: undefined, screen: "Dashboard", drop: undefined, merge: undefined, popupScreens: undefined },
+      { index: 2, kind: "shared", group: 1, screen: undefined, drop: undefined, merge: undefined, popupScreens: undefined },
+      { index: 3, kind: undefined, group: undefined, screen: undefined, drop: true, merge: undefined, popupScreens: undefined },
+      { index: 4, kind: undefined, group: undefined, screen: undefined, drop: undefined, merge: undefined, popupScreens: undefined }
+    ])
+    expect(uiPlanFromModel(undefined, ASKED)).toBeNull()
+    expect(uiPlanFromModel([{ index: 7, ui: "own" }], ASKED)).toBeNull()
+    expect(uiPlanFromModel([{ index: 1, ui: "own" }], [])).toBeNull()
   })
 
   it("parseUiAnswer: nút chọn nhanh - giữ tất cả / bỏ use case đề xuất / dùng chung", () => {
@@ -642,6 +673,13 @@ describe("FLF-318 - xoá use case (luật 3g)", () => {
     expect(useCaseIntent("xoá màn Login")).toBeNull()
   })
 
+  it("useCaseIntent: động từ bị phủ định không tính", () => {
+    expect(useCaseIntent("không thêm UC nữa, chỉ sửa UC-3 cho đúng actor")).toBe("edit")
+    expect(useCaseIntent("đừng xoá use case Login, đổi tên nó thành Sign In")).toBe("edit")
+    expect(useCaseIntent("don't remove the use case, rename it to Sign In")).toBe("edit")
+    expect(isAddUseCaseInstruction("không thêm use case nào nữa")).toBe(false)
+  })
+
   const uc = FIXTURE.use_cases.find((u) => u.function_ids.length > 0)!
 
   it("removalLeftovers: chỉ xoá use case ⇒ chức năng chỉ thuộc nó còn sót; xoá đủ ⇒ không sót", () => {
@@ -737,3 +775,75 @@ describe("FLF-318 - sửa use case (luật 3h)", () => {
     expect(interpolatePrompt(getSkill("apply-change-op").template, { use_case_edit: false })).not.toContain("3h. **Editing a use case")
   })
 })
+
+describe("FLF-486 - quyền access (dấu X của ma trận import), lỗi no_view rõ hơn, lựa chọn nhanh một use case", () => {
+  const withAction = (action: string | null): Spine => {
+    const after = structuredClone(FIXTURE)
+    after.screens.push({ ...FIXTURE.screens[1], id: "S90", name: "Forgot Password", flow_to: [] })
+    after.screens[0].flow_to.push({ to: "S90" })
+    after.functions.push({ ...FIXTURE.functions[0], id: "FN90", screen_id: "S90" })
+    after.use_cases.push({ ...FIXTURE.use_cases[0], id: "UC90", name: "Reset Password", actor_ids: ["A02"], function_ids: ["FN90"] })
+    if (action) after.permissions.push({ id: "P90", screen_id: "S90", role_id: "R2", action })
+    return after
+  }
+  const noView = (spine: Spine) => newUseCaseScreenIssues(FIXTURE, spine).filter((i) => i.kind === "no_view")
+
+  it("B1: quyền access (ma trận X) hoặc view đều tính là được xem; không có dòng nào thì vẫn no_view", () => {
+    expect(noView(withAction("access"))).toEqual([])
+    expect(noView(withAction("view"))).toEqual([])
+    expect(noView(withAction("create"))).toHaveLength(1)
+    expect(noView(withAction(null))).toHaveLength(1)
+  })
+
+  it("B1: editIssues không báo new_actor_no_view khi vai trò mới có dòng access", () => {
+    const uc = FIXTURE.use_cases.find((u) => u.id === "UC01")!
+    const screens = [...new Set(FIXTURE.functions.filter((f) => uc.function_ids.includes(f.id) && f.screen_id).map((f) => f.screen_id as string))]
+    const plan = (ops: Op[]) => planTransaction(FIXTURE, { base_version: FIXTURE.spine_version, ops, by: "t" }, { startSeq: 1 }).spine
+    const newActors = uc.actor_ids.map((a) => (a === "A04" ? "A03" : a))
+    const after = plan([
+      { op: "set", path: "use_cases[id=UC01].actor_ids", value: newActors },
+      ...screens.map((screen) => ({ op: "add" as const, path: "permissions[]", value: { screen_id: screen, role_id: "R3", action: "access" } }))
+    ])
+    expect(editIssues(FIXTURE, after).filter((i) => i.kind === "new_actor_no_view")).toEqual([])
+  })
+
+  it("B2: câu no_view nêu tên use case và dặn giữ nguyên use case, chỉ thêm dòng quyền", () => {
+    const [issue] = noView(withAction(null))
+    const text = useCaseScreenProblemText(issue)
+    expect(text).toContain('use case "Reset Password"')
+    expect(text).toContain("Keep this use case")
+  })
+
+  it("B4: một use case nhiều màn ⇒ lựa chọn nói về bước; hai use case ⇒ lựa chọn cũ", () => {
+    const ops: Op[] = [
+      { op: "add", path: "screens[]", value: { id: "$s1", name: "Forgot Password", feature_id: "F4", flow_to: ["$s2"], tabs: [] } },
+      { op: "add", path: "screens[]", value: { id: "$s2", name: "Set New Password", feature_id: "F4", flow_to: [], tabs: [] } },
+      { op: "add", path: "functions[]", value: { ...FIXTURE.functions[0], id: "$f1", screen_id: "$s1" } },
+      { op: "add", path: "functions[]", value: { ...FIXTURE.functions[0], id: "$f2", screen_id: "$s2" } },
+      { op: "add", path: "use_cases[]", value: { name: "Reset Password", actor_ids: ["A02"], function_ids: ["$f1", "$f2"], description: "..." } },
+      { op: "set", path: "screens[id=S01].flow_to", value: [...FIXTURE.screens[0].flow_to, "$s1"] }
+    ]
+    const ask = screenKindQuestion(FIXTURE, ops)!
+    expect(ask.choices[0]).toBe("Mỗi bước một màn riêng")
+    expect(screenKindQuestion(FIXTURE, ops, "en")!.choices[0]).toBe("Each step its own screen")
+    const asked = askedList(`User: thêm use case\nAI: ${ask.text}`)
+    expect(parseUiAnswer("Mỗi bước một màn riêng", asked)[0]?.kind).toBe("own")
+    expect(parseUiAnswer("Gộp các bước vào một màn", asked)[0]?.merge).toBe(true)
+    // câu trả lời cũ vẫn đọc được
+    expect(parseUiAnswer("Mỗi use case một màn hình riêng", asked)[0]?.kind).toBe("own")
+    expect(screenKindQuestion(FIXTURE, multiOpsForTwo())!.choices[0]).toBe("Mỗi use case một màn hình riêng")
+  })
+})
+
+/** Hai use case, mỗi cái một màn mới. */
+function multiOpsForTwo(): Op[] {
+  return [
+    { op: "add", path: "screens[]", value: { id: "$s1", name: "Screen A", feature_id: "F4", flow_to: [], tabs: [] } },
+    { op: "add", path: "screens[]", value: { id: "$s2", name: "Screen B", feature_id: "F4", flow_to: [], tabs: [] } },
+    { op: "add", path: "functions[]", value: { ...FIXTURE.functions[0], id: "$f1", screen_id: "$s1" } },
+    { op: "add", path: "functions[]", value: { ...FIXTURE.functions[0], id: "$f2", screen_id: "$s2" } },
+    { op: "add", path: "use_cases[]", value: { name: "Do A", actor_ids: ["A02"], function_ids: ["$f1"], description: "..." } },
+    { op: "add", path: "use_cases[]", value: { name: "Do B", actor_ids: ["A01"], function_ids: ["$f2"], description: "..." } },
+    { op: "set", path: "screens[id=S01].flow_to", value: [...FIXTURE.screens[0].flow_to, "$s1", "$s2"] }
+  ]
+}

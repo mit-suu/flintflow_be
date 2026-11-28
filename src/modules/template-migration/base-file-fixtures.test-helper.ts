@@ -69,6 +69,8 @@ export interface SourceOptions {
   unsafeOverview?: boolean
   /** Overview: ảnh thứ hai + bảng + field INCLUDETEXT sau bảng — chép nhiều đoạn, đoạn cuối lỗi (mục dựng từ Spine, ảnh đã chép phải được dọn). */
   overviewTrap?: boolean
+  /** Overview có heading con không nằm trong layout (import gộp heading con cùng mục vào mục cha) — số heading của file lệch layout. */
+  subHeading?: boolean
 }
 
 /** File nền v1: Introduction (chữ, danh sách, ảnh, footnote), Overview (bảng 2 cột), Extra Notes (mục riêng), Record of Changes, Edited. */
@@ -93,6 +95,7 @@ export const buildV1Source = (opts: SourceOptions = {}): Promise<Buffer> =>
       (opts.overviewTrap ? `<w:p>${drawing.replace("rId10", "rId11")}</w:p>` : "") +
       tbl([["Feature", "Priority"], ["Feature X", "High"], ["Feature Y", "Low"]], 9000, "TabA") +
       (opts.overviewTrap ? `<w:p><w:fldSimple w:instr=" INCLUDETEXT &quot;c:\\secret.docx&quot; "><w:r><w:t>x</w:t></w:r></w:fldSimple></w:p>` : "") +
+      (opts.subHeading ? h1("Overview detail", "u1") + p("Overview detail text v1") : "") +
       h1("3 Extra Notes", "u1") +
       p("Extra note text v1") +
       h1("Record of Changes", "u1") +

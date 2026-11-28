@@ -162,6 +162,7 @@ export const OUTPUT_SCHEMA_NAMES = [
   "crClarify",
   "crPropose",
   "crMaterialImage",
+  "crRecordSummary",
   // Knowledge RAG (FLF-267)
   "knowledgeAnswer",
   // FLF-338 rút yêu cầu từ tài liệu thô
@@ -200,8 +201,8 @@ export interface SkillAsset {
   /** Tên file trong references/ (không đuôi .md), sắp xếp. Nội dung nạp theo yêu cầu. */
   referenceNames: string[]
   /**
-   * Reference luôn nạp kèm thân skill khi skill là skill nội dung của một step (frontmatter `prompt_references`, tuỳ chọn).
-   * FLF-370: không khai thì references chỉ là tài liệu cho người đọc — model không bao giờ thấy.
+   * Reference luôn nạp kèm thân skill (frontmatter `prompt_references`, tuỳ chọn): skill nội dung của step (FLF-370) và
+   * skill hành động (FLF-449 N3). Không khai thì references chỉ là tài liệu cho người đọc — model không bao giờ thấy.
    */
   promptReferences: string[]
   /** sha256 hex của SKILL.md + references, xuống dòng chuẩn hoá LF. */
@@ -223,6 +224,14 @@ const SKILL_REQUIRED_FIELDS = [
   "output_schema",
   "language"
 ] as const
+
+/**
+ * FLF-449 N3: trần phần tĩnh của prompt một skill (thân SKILL.md + mọi reference khai ở `prompt_references`), tính bằng ký
+ * tự. Phần này gửi lại ở MỌI lượt gọi, trước projection / tài liệu / lịch sử chat. 48 000 ký tự (~12k token) ≈ 1,5 lần
+ * prompt tĩnh lớn nhất hiện có (`elicit-loop` + `when-to-offer-choices` ≈ 31k): đủ chỗ cho luật mới, nhưng chặn lúc nạp
+ * việc khai bừa reference làm prompt phình (luật càng dài model càng bỏ sót, và tiền token nhân theo số lượt).
+ */
+export const MAX_SKILL_PROMPT_CHARS = 48_000
 
 export const getSkillsDir = (): string => path.join(getAssetsRoot(), "skills")
 
@@ -261,7 +270,8 @@ export const computeSkillAssetVersion = (skillDir: string, referenceNames: strin
   return hash.digest("hex")
 }
 
-const parseSkill = (skillsDir: string, kind: SkillKind, dirName: string): SkillAsset => {
+/** Đọc + kiểm một skill (`<skillsDir>/<kind>/<dirName>/SKILL.md`). Export cho test kiểm lỗi lúc nạp trên thư mục tạm. */
+export const parseSkill = (skillsDir: string, kind: SkillKind, dirName: string): SkillAsset => {
   const rel = `${kind}/${dirName}`
   const skillDir = path.join(skillsDir, kind, dirName)
   const { data, content } = matter(readNormalized(path.join(skillDir, SKILL_FILE)))
@@ -313,6 +323,16 @@ const parseSkill = (skillsDir: string, kind: SkillKind, dirName: string): SkillA
     throw new Error(
       `[${rel}] prompt_references trỏ tới reference không có: ${unknownReferences.join(", ")} ` +
         `(có: ${referenceNames.join(", ") || "không có"}).`
+    )
+  }
+  if (new Set(promptReferences).size !== promptReferences.length) {
+    throw new Error(`[${rel}] prompt_references khai trùng tên: ${promptReferences.join(", ")}.`)
+  }
+  const promptChars = template.length + promptReferences.reduce((sum, name) => sum + readNormalized(path.join(skillDir, REFERENCES_DIR, `${name}.md`)).trim().length, 0)
+  if (promptChars > MAX_SKILL_PROMPT_CHARS) {
+    throw new Error(
+      `[${rel}] Thân SKILL.md + prompt_references dài ${promptChars} ký tự, vượt trần ${MAX_SKILL_PROMPT_CHARS}. ` +
+        `Rút gọn luật hoặc bỏ bớt reference khỏi prompt_references (xem assets/skills/README.md).`
     )
   }
 

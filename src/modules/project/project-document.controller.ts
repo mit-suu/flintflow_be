@@ -9,6 +9,9 @@ import { getProjectById } from "./project.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { precheckDocx } from "../import/docx-precheck.js"
 import { referenceTokenMeta } from "./document-token-limit.js"
+import { attachmentDisposition } from "../render/export.controller.js"
+import { contentTypeOfExtension, openDocumentDownload } from "./project-document.storage.js"
+import { pipeline } from "node:stream"
 
 /** FLF-292: nguồn tài liệu của từng phần tử Spine (phần tử đã xoá khỏi Spine không trả về). */
 export const getSources = catchAsync(async (req: Request, res: Response) => {
@@ -38,6 +41,8 @@ export const uploadDocument = catchAsync(async (req: Request, res: Response) => 
   const body = (req.body ?? {}) as { replace_document_id?: unknown; keep_both?: unknown }
   const replaceDocumentId = typeof body.replace_document_id === "string" && body.replace_document_id.trim() ? body.replace_document_id.trim() : null
   const keepBoth = body.keep_both === true || body.keep_both === "true"
+  // multer đọc tên file theo latin1 — đổi lại UTF-8 để giữ tên tiếng Việt (như `precheckDocument`)
+  if (file) file.originalname = Buffer.from(file.originalname, "latin1").toString("utf8")
   const document = await projectDocumentService.uploadProjectDocument(requireOrgId(req), userId, projectId, file as Express.Multer.File, {
     replaceDocumentId,
     keepBoth
@@ -64,9 +69,31 @@ export const getDocuments = catchAsync(async (req: Request, res: Response) => {
 
   const projectId = Array.isArray(req.params.projectId) ? req.params.projectId[0] : req.params.projectId
   const orgId = requireOrgId(req)
-  const documents = await projectDocumentService.getProjectDocuments(orgId, projectId)
-  // FLF-405: FE hiện "đã dùng x / y token" của tài liệu tham khảo
-  return sendSuccess(res, 200, documents, await referenceTokenMeta(orgId, projectId))
+  const role = req.orgContext?.role
+  const [documents, tokenMeta, summaryEstimate] = await Promise.all([
+    projectDocumentService.getProjectDocuments(orgId, projectId),
+    referenceTokenMeta(orgId, projectId),
+    // FLF-458: credit cần để AI đọc tài liệu tham khảo đang chờ (`summaryStatus: "pending"`) — báo trước khi xác nhận đọc
+    projectDocumentService.pendingSummaryEstimate(orgId, userId, projectId, { withBalance: role === "lead" || role === "analyst" })
+  ])
+  return sendSuccess(res, 200, documents, { ...tokenMeta, summary_credit_estimate: summaryEstimate })
+})
+
+/**
+ * FLF-458: `POST /projects/:id/documents/summarize` — xác nhận AI đọc các tài liệu tham khảo đang chờ (business-flow §3.6:
+ * báo credit trước ở `GET /documents` `meta.summary_credit_estimate`, chỉ đọc sau khi người dùng xác nhận). `document_ids`
+ * rỗng / không gửi ⇒ đọc hết tài liệu đang chờ của dự án.
+ */
+export const summarizeDocuments = catchAsync(async (req: Request, res: Response) => {
+  const userId = req.user?.userId
+  if (!userId) {
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
+  }
+  const projectId = Array.isArray(req.params.projectId) ? req.params.projectId[0] : req.params.projectId
+  const body = (req.body ?? {}) as { document_ids?: unknown }
+  const documentIds = Array.isArray(body.document_ids) ? body.document_ids.filter((id): id is string => typeof id === "string") : []
+  const documents = await projectDocumentService.summarizeReferenceDocuments(requireOrgId(req), userId, projectId, documentIds)
+  return sendSuccess(res, 200, documents.map((d) => d.toJSON()))
 })
 
 export const deleteDocument = catchAsync(async (req: Request, res: Response) => {
@@ -79,4 +106,37 @@ export const deleteDocument = catchAsync(async (req: Request, res: Response) => 
   const documentId = Array.isArray(req.params.documentId) ? req.params.documentId[0] : req.params.documentId
   await projectDocumentService.deleteProjectDocument(requireOrgId(req), projectId, documentId)
   return sendSuccess(res, 200, { deleted: true })
+})
+
+const paramOf = (value: string | string[] | undefined): string => (Array.isArray(value) ? value[0] : value) ?? ""
+
+/** FLF-443: `GET /projects/:id/documents/:docId/text` — chữ tài liệu tham khảo chia đoạn theo mã `D<n>-P<mm>`. */
+export const getDocumentText = catchAsync(async (req: Request, res: Response) => {
+  const result = await projectDocumentService.getReferenceDocumentText(requireOrgId(req), paramOf(req.params.projectId), paramOf(req.params.docId))
+  return sendSuccess(res, 200, result)
+})
+
+/** FLF-443: `GET /projects/:id/documents/:docId/download` — stream file gốc từ kho lưu trữ (không bọc envelope). */
+export const downloadDocument = catchAsync(async (req: Request, res: Response) => {
+  const doc = await projectDocumentService.findProjectDocument(
+    requireOrgId(req),
+    paramOf(req.params.projectId),
+    paramOf(req.params.docId),
+    "originalName extension cloudinaryPublicId"
+  )
+  // Kho lỗi ⇒ 503 trước khi gửi bất kỳ header nào
+  const download = await openDocumentDownload(doc.cloudinaryPublicId, doc.extension)
+
+  res.status(200)
+  res.setHeader("Content-Type", contentTypeOfExtension(doc.extension))
+  res.setHeader("Content-Disposition", attachmentDisposition(doc.originalName))
+  res.setHeader("X-Content-Type-Options", "nosniff")
+  if (download.contentLength !== null) res.setHeader("Content-Length", String(download.contentLength))
+  pipeline(download.stream, res, (err) => {
+    download.dispose()
+    if (err) {
+      console.warn(`[ProjectDocument] Luồng tải bị ngắt: ${err.message}`)
+      res.destroy()
+    }
+  })
 })

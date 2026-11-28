@@ -12,12 +12,14 @@ import {
   IMPORT_FILE_FIELD,
   confirmLatestRequestSchema,
   extractRequestSchema,
+  documentLanguageRequestSchema,
   dropTextRequestSchema,
   fieldsPatchRequestSchema,
   finalizeRequestSchema,
   continueFlow2RequestSchema,
   gapReportQuerySchema,
   importResumeRequestSchema,
+  reviewSectionRequestSchema,
   mappingPatchRequestSchema,
   stepPlanPatchRequestSchema,
   uploadImportBodySchema
@@ -26,10 +28,16 @@ import * as extractService from "./extract.service.js"
 import * as extractJobs from "./extract-jobs.js"
 import * as finalizeJobs from "./finalize-jobs.js"
 import { continueInFlow2 } from "./flow2.service.js"
+import * as layoutPreviewService from "./layout-preview.service.js"
 import * as gapReportService from "./gap-report.service.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { assertNotMode1 } from "./mode1-guard.js"
 import * as importService from "./import.service.js"
+import { assertImportStatus } from "./import.service.js"
+import { IMPORT_STATUS_LABELS } from "./import.state.js"
+import { TemplateProfile } from "./template-profile.model.js"
+import * as reviewService from "./review.service.js"
+import { buildImportSource, importSourceEtag } from "./import-source.service.js"
 import * as reuploadService from "./reupload.service.js"
 import * as stepPlanService from "./step-plan.service.js"
 import { authorizeMode1, mode1Handler, parseInput } from "./mode1.http.js"
@@ -107,6 +115,19 @@ export const getImport = mode1Handler(async (req, res) => {
   return sendSuccess(res, 200, view)
 })
 
+/**
+ * Chữ gốc của file theo mục cho màn đọc file: tải một lần. `ETag` theo bản import + số block; FE gửi lại `If-None-Match` ⇒ 304
+ * không đọc nội dung.
+ */
+export const getImportSource = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const { importId, etag } = await importSourceEtag(auth.projectId)
+  res.setHeader("ETag", etag)
+  res.setHeader("Cache-Control", "private, no-cache")
+  if (req.headers["if-none-match"]?.split(",").some((t) => t.trim() === etag || t.trim() === `W/${etag}`)) return res.status(304).end()
+  return sendSuccess(res, 200, await buildImportSource(auth.projectId, importId))
+})
+
 export const patchMapping = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const body = parseInput(mappingPatchRequestSchema, req.body)
@@ -115,8 +136,8 @@ export const patchMapping = mode1Handler(async (req, res) => {
 })
 
 export const reupload = mode1Handler(async (req, res) => {
-  const auth = await authorizeMode1(req)
-  const diff = await reuploadService.reupload(auth.projectId, auth.userId, requireFile(req))
+  const auth = await authorizeMode1(req, { allowBeforeBaseline: true })
+  const diff = await reuploadService.reupload(auth.projectId, auth.userId, requireFile(req), auth.project)
   return sendSuccess(res, 201, reuploadService.toReuploadDto(diff))
 })
 
@@ -141,6 +162,14 @@ export const dropText = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const body = parseInput(dropTextRequestSchema, req.body)
   const doc = await importService.setDropText(auth.projectId, body)
+  return sendSuccess(res, 200, { import: importService.toImportDto(doc) })
+})
+
+/** FLF-456: lưu ngôn ngữ tài liệu khi file chỉ còn khung (trước Bắt đầu); FE đọc lại `GET /import` để có credit mới. */
+export const documentLanguage = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(documentLanguageRequestSchema, req.body)
+  const doc = await importService.setSkeletonLanguage(auth.projectId, body)
   return sendSuccess(res, 200, { import: importService.toImportDto(doc) })
 })
 
@@ -170,9 +199,71 @@ export const continueFlow2 = mode1Handler(async (req, res) => {
   return sendSuccess(res, 200, await continueInFlow2(auth.projectId, auth.userId, body))
 })
 
+/** FLF-461 (bước 2.9a): xem trước bố cục mới của chế độ 4 trước khi áp vào bản in. */
+export const layoutPreview = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req, { allowDrafting: true })
+  return sendSuccess(res, 200, await layoutPreviewService.getLayoutPreview(auth.projectId))
+})
+
+/** FLF-461 (bước 2.9a): người dùng xác nhận bố cục mới ⇒ bản in từ giờ áp bố cục đó. */
+export const layoutConfirm = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req, { allowDrafting: true })
+  return sendSuccess(res, 200, await layoutPreviewService.confirmLayout(auth.projectId))
+})
+
 /**
- * Tiếp tục bước đang dừng: `extracting` ⇒ I-4 từ cursor; `baselining` (job finalize lỗi / mất) ⇒ chạy lại finalize từ
- * mốc; `checking` ⇒ 1.11–1.12. Đều chạy nền, trả ngay.
+ * FLF-453 (business-flow §3.1.2 "Rà soát phần có sẵn"): người dùng xác nhận credit ở `reviewing` ⇒ chạy AI rà các mục
+ * Code đã chọn (`TemplateProfile.review_sections`), rồi sang Luồng 2 như `continueFlow2`. Lượt AI lỗi / hết credit ⇒
+ * trả `import` đang `paused`, không sang Luồng 2 — gọi lại endpoint này để tiếp tục (lượt đã trừ credit không chạy lại).
+ */
+export const reviewRun = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(importResumeRequestSchema, req.body)
+  const doc = await importService.requireImport(auth.projectId, body.import_id)
+  assertImportStatus(doc, ["reviewing"], "drafting")
+  const profile = await TemplateProfile.findOne({ projectId: auth.projectId })
+  const result = await reviewService.runReview(doc, auth.userId, profile?.review_sections ?? [])
+  if ("paused" in result) return sendSuccess(res, 200, { import: importService.toImportDto(doc) })
+  return sendSuccess(res, 200, result)
+})
+
+/**
+ * FLF-453 nút "Rà soát bằng AI" của một mục chỉ được Code kiểm (business-flow §3.1.2), ở `reviewing`. Không có `confirm: true`
+ * ⇒ chỉ báo credit riêng của mục (không gọi AI, không trừ). Có `confirm` ⇒ chạy qua `runReview` cùng đường lô; vẫn `reviewing`
+ * (không sang Luồng 2). Hết credit / lỗi ⇒ `{ import }` đang `paused`.
+ */
+export const reviewSection = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(reviewSectionRequestSchema, req.body)
+  const doc = await importService.requireImport(auth.projectId, body.import_id)
+  assertImportStatus(doc, ["reviewing"], "reviewing")
+  const profile = await TemplateProfile.findOne({ projectId: auth.projectId })
+  const options = await reviewService.optionalReviewSections(auth.projectId, profile?.target_structure, profile?.review_sections ?? [])
+  const option = options.find((o) => o.section_id === body.section_id)
+  if (!option) throw new Mode1Error("IMPORT_INVALID_STATE", "Mục này không có chữ để AI rà riêng hoặc đã được rà.", { section_id: body.section_id })
+  if (!body.confirm) return sendSuccess(res, 200, { section_id: option.section_id, calls: option.calls, credits: option.credits, reviewed: false })
+  const result = await reviewService.runSectionReview(doc, auth.userId, option.section_id)
+  if ("paused" in result) return sendSuccess(res, 200, { import: importService.toImportDto(doc), section_id: option.section_id, reviewed: false })
+  return sendSuccess(res, 200, { import: importService.toImportDto(doc), section_id: option.section_id, reviewed: true })
+})
+
+/** Bấm Dừng khi vòng rà soát đang chạy (business-flow §2 "Dừng giữa chừng") — giữ tiến độ, lượt chưa trừ credit không chạy. */
+export const reviewStop = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(importResumeRequestSchema, req.body)
+  const doc = await importService.requireImport(auth.projectId, body.import_id)
+  if (doc.status !== "reviewing") {
+    throw new Mode1Error("IMPORT_INVALID_STATE", `Không thực hiện được khi lần nhập tài liệu đang ở bước "${IMPORT_STATUS_LABELS[doc.status] ?? doc.status}"`, { status: doc.status, to: "reviewing", allowed: ["reviewing"] })
+  }
+  doc.paused = { reason: "user", at: new Date() }
+  await doc.save()
+  return sendSuccess(res, 200, { import: importService.toImportDto(doc) })
+})
+
+/**
+ * Tiếp tục bước đang dừng: `extracting` ⇒ I-4 từ cursor; `fields_review` (FLF-462, bước 1.6) ⇒ báo lỗi nếu còn gì cần
+ * xác nhận (xem `PATCH /import/fields`), hết việc cần xác nhận mới sang `baselining`; `baselining` (job finalize lỗi /
+ * mất) ⇒ chạy lại finalize từ mốc; `checking` ⇒ 1.11–1.12. Đều chạy nền, trả ngay.
  */
 export const resume = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)

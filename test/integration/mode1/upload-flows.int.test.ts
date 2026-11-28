@@ -1,7 +1,8 @@
 /**
  * FLF-411 — ba luồng upload SRS (hộp Tạo dự án), chạy trọn upload ⇒ màn đọc khung ⇒ đọc nội dung ⇒ finalize trên file thật:
  *
- * 1. Up **template trống** (giữ khung) ⇒ khung mẫu: không trích chữ / hình mẫu, soạn đủ mọi mục (luồng C), không dữ liệu ví dụ.
+ * 1. Up **template trống** (giữ khung) ⇒ nhãn khung mẫu; FLF-463: bảng / hình mẫu còn trong file là "có" cho tới khi người dùng
+ *    **Bỏ tất cả** ở màn đọc khung ⇒ không trích chữ / hình mẫu, soạn đủ mọi mục, không dữ liệu ví dụ.
  * 2. Up **SRS có sẵn, không tick** "Bổ sung các mục còn thiếu theo mẫu chuẩn FlintFlow" ⇒ giữ đúng khung file (chế độ 1 khi đủ mục).
  * 3. Up **SRS có sẵn, tick** ⇒ đích là mẫu FlintFlow (bổ sung mục thiếu). FLF-416: còn thiếu ⇒ chế độ 4 vào Luồng 2 như chế độ 3
  *    (bước của mục thiếu chờ soạn, bước của mục khách đã viết giữ chốt).
@@ -14,9 +15,10 @@ import app from "../../../src/app.js"
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeMode1 } from "../../helpers/mode1.js"
 import { seedFixture, type SeededFixture } from "../../setup.js"
-import { runExtraction } from "../../../src/modules/import/extract.service.js"
-import { acceptLatest } from "../../../src/modules/import/import.service.js"
+import { runExtraction } from "../../helpers/mode1-import-p4.js"
+import { acceptLatest, applyDropText } from "../../../src/modules/import/import.service.js"
 import { startFinalize, waitForFinalize } from "../../../src/modules/import/finalize-jobs.js"
+import { finishReviewIfPending } from "../../helpers/mode1-import-p4.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
 import { Project } from "../../../src/modules/project/project.model.js"
@@ -49,20 +51,30 @@ const create = async (body: Record<string, unknown>) => {
 }
 
 /** Upload ⇒ màn đọc khung ⇒ Bắt đầu (đọc nội dung) ⇒ finalize. */
-const uploadAndFinalize = async (file: URL, completeToStandard: boolean) => {
+const uploadAndFinalize = async (file: URL, completeToStandard: boolean, opts: { dropAll?: boolean } = {}) => {
   const { seeded, projectId } = await create({ has_srs_file: true, complete_to_standard: completeToStandard })
   const uploaded = await request(app).post(`/api/v1/projects/${projectId}/import`).set(H(seeded)).attach("file", await readFile(file), "SRS.docx")
   expect(uploaded.status, JSON.stringify(uploaded.body.error)).toBe(201)
   const importId = String(uploaded.body.data.import.id)
-  const view = (await request(app).get(`/api/v1/projects/${projectId}/import`).set(H(seeded))).body.data
+  const initial = (await request(app).get(`/api/v1/projects/${projectId}/import`).set(H(seeded))).body.data
+  // FLF-463: màn đọc khung — "Bỏ tất cả" (mục chỉ còn khung) rồi Bắt đầu viết lại file
+  if (opts.dropAll) {
+    const keys = (initial.text_sections as { key: string }[]).map((s) => s.key)
+    const dropped = await request(app).patch(`/api/v1/projects/${projectId}/import/drop-text`).set(H(seeded)).send({ import_id: importId, keys })
+    expect(dropped.status, JSON.stringify(dropped.body.error)).toBe(200)
+  }
+  const view = opts.dropAll ? (await request(app).get(`/api/v1/projects/${projectId}/import`).set(H(seeded))).body.data : initial
   const preview = view.structure_preview
   const estimate = view.credit_estimate
+  if (opts.dropAll) await applyDropText((await ImportedDocument.findById(importId))!)
   const doc = (await ImportedDocument.findById(importId))!
   await acceptLatest(doc, true)
   await runExtraction(projectId, seeded.userId, importId)
   const usageAfterRead = await Usage.countDocuments({ projectId })
   await startFinalize(projectId, seeded.userId, { import_id: importId, base_version: (await spineRepository.get(projectId))!.spine_version })
   await waitForFinalize(importId)
+  // FLF-453: AI giả không phát hiện gì ở vòng rà soát (business-flow §3.1.2) — test này không chủ đích kiểm vòng rà soát
+  await finishReviewIfPending(projectId, seeded.userId, importId)
   const project = (await Project.findById(projectId).lean())!
   const spine = (await spineRepository.get(projectId))!
   const profile = (await TemplateProfile.findOne({ projectId }).lean())!
@@ -70,8 +82,8 @@ const uploadAndFinalize = async (file: URL, completeToStandard: boolean) => {
 }
 
 describe("FLF-411 - ba luồng upload", () => {
-  it("1. up template trống (giữ khung) ⇒ khung mẫu, không đọc nội dung bằng AI, Spine không có dữ liệu ví dụ, soạn đủ từ đầu", async () => {
-    const r = await uploadAndFinalize(REPORT3_TEMPLATE, false)
+  it("1. up template trống (giữ khung) + Bỏ tất cả ⇒ khung mẫu, không đọc nội dung bằng AI, Spine không có dữ liệu ví dụ, soạn đủ từ đầu", async () => {
+    const r = await uploadAndFinalize(REPORT3_TEMPLATE, false, { dropAll: true })
     expect(r.preview.summary).toMatchObject({ kind: "template", present: 0 })
     expect(r.preview.intent).toBe("fixed")
     // Không gọi AI đọc chữ / hình mẫu; FLF-411 (U1-8): màn đọc khung không báo credit (không đọc, không kiểm tra AI)
@@ -132,9 +144,10 @@ describe("FLF-411 - ba luồng upload", () => {
     for (const owner of draftOwners) expect(statusOf(owner), owner).toContain("pending")
     // Bước sở hữu mục khách đã viết giữ chốt
     for (const owner of keepOwners) expect(statusOf(owner).includes("pending"), owner).toBe(false)
-    // Brief mở lại (2.4): B-1.1 chờ chạy, B-0 bỏ qua
+    // FLF-461: B-0 chạy lại (phần đã có làm đầu vào) rồi Brief mở lại: B-0.1 chờ chạy
+    expect(r.spine.steps.find((st) => st.id === "B-0.1")?.status).toBe("pending")
     expect(r.spine.steps.find((st) => st.id === "B-1.1")?.status).toBe("pending")
-    expect(r.spine.progress.current_step).toBe("B-1.1")
+    expect(r.spine.progress.current_step).toBe("B-0.1")
 
     // Bản in (2.10): file khách là nền (giữ style), Glossary soạn thêm chèn thành heading mới đúng vị trí mẫu chuẩn
     const term = "Checkout Basket FLF416"
@@ -142,6 +155,16 @@ describe("FLF-411 - ba luồng upload", () => {
       base_version: r.spine.spine_version, by: r.seeded.userId, reason: "Draft glossary", step_id: null,
       ops: [{ op: "add", path: "glossary[]", value: { id: "G-416", term, definition: "Giỏ hàng lúc thanh toán." } }]
     })
+    // FLF-461 (bước 2.9a nằm sau khi soạn xong): mục thiếu đã soạn (Glossary ở trên) ⇒ coi như đã có, bản xem trước xác nhận được (`ready`)
+    const draftedProfile = (await TemplateProfile.findOne({ projectId: r.projectId }).lean())!
+    await TemplateProfile.updateOne(
+      { projectId: r.projectId },
+      { $set: { "target_structure.sections": draftedProfile.target_structure!.sections.map((sec) => (sec.status === "missing" ? { ...sec, status: "present", owner_steps: [] } : sec)), "target_structure.missing": [] } }
+    )
+    // FLF-461 (bước 2.9a): người xác nhận bố cục mới rồi bản in mới chèn mục soạn thêm đúng vị trí mẫu chuẩn
+    const confirmed = await request(app).post(`/api/v1/projects/${r.projectId}/import/layout-preview/confirm`).set(H(r.seeded))
+    expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200)
+    expect(confirmed.body.data.confirmed_at).toBeTruthy()
     const original = await docFileStore().load(r.profile.source_file_ref!)
     const exported = await request(app)
       .get(`/api/v1/projects/${r.projectId}/export/word?source=draft`)
@@ -188,8 +211,8 @@ describe("FLF-411 - ba luồng upload", () => {
     expect(readZipText(afterExport.body as Buffer, "word/document.xml")).toContain(term)
   }, 180000)
 
-  it("1b. up template trống, tick Bổ sung theo mẫu chuẩn ⇒ vẫn là khung mẫu, không nhập chữ / hình ví dụ của mẫu làm dữ liệu", async () => {
-    const r = await uploadAndFinalize(REPORT3_TEMPLATE, true)
+  it("1b. up template trống, tick Bổ sung theo mẫu chuẩn + Bỏ tất cả ⇒ vẫn là khung mẫu, không nhập chữ / hình ví dụ của mẫu làm dữ liệu", async () => {
+    const r = await uploadAndFinalize(REPORT3_TEMPLATE, true, { dropAll: true })
     expect(r.preview.intent).toBe("free")
     expect(r.preview.summary.kind).toBe("template")
     expect(r.spine.project.system_name ?? null).toBeNull()

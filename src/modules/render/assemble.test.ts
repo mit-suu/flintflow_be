@@ -132,6 +132,11 @@ vi.mock("./rendered-document.model.js", () => ({
 vi.mock("../spine/baseline.model.js", () => ({ Baseline: { findOne: baselineDb.findOne } }))
 vi.mock("../spine/change.model.js", () => ({ Change: { find: changeDb.find, findOne: changeDb.findOne } }))
 vi.mock("../user/user.model.js", () => ({ User: { find: userDb.find } }))
+// FLF-484: nhãn bản nháp lấy từ số DocVersion (mode 1); mode 2 không có hàng nào
+const docVersionDb = vi.hoisted(() => ({ versions: [] as string[] }))
+vi.mock("../doc-version/doc-version.model.js", () => ({
+  DocVersion: { find: () => ({ lean: async () => docVersionDb.versions.map((version) => ({ version })) }) }
+}))
 // FLF-411 (U2-6): "In charge" của dòng CR = người tạo CR
 const crDb = vi.hoisted(() => ({ rows: [] as Record<string, unknown>[] }))
 vi.mock("../change-request/change-request.model.js", () => ({
@@ -170,7 +175,7 @@ vi.mock("./consistency-pass.js", async (importOriginal) => {
 vi.mock("../translation/translation.repository.js", () => ({ findByHashes: vi.fn(), translationRevision: vi.fn(async () => null) }))
 
 import * as spineRepository from "../spine/spine.repository.js"
-import { _internal, assemble, isExistingSrs, getDocument, getDocumentWithMeta, getDraftMeta, NoWorkingDraftError, type TranslationResolver } from "./assemble.service.js"
+import { RENDER_FORMAT_VERSION, _internal, assemble, isExistingSrs, getDocument, getDocumentWithMeta, getDraftMeta, NoWorkingDraftError, type TranslationResolver } from "./assemble.service.js"
 import { clearDocumentMemo } from "./rendered-document-memo.js"
 import { clearChangeLogs } from "../spine/change-log.js"
 import { runConsistencyPass } from "./consistency-pass.js"
@@ -425,7 +430,7 @@ describe("assemble()", () => {
     it("system ⇒ 'System'; user có tên ⇒ tên; user không còn ⇒ id rút gọn", async () => {
       changeDb.setRows([
         { projectId: PROJECT, txn: "t1", at: new Date("2026-09-01T00:00:00.000Z"), by: "650000000000000000000010", reason: "seed", op: "add", step_id: null, seq: 1 },
-        { projectId: PROJECT, txn: "t2", at: new Date("2026-09-02T00:00:00.000Z"), by: "system", reason: "render", op: "set", step_id: null, seq: 2 },
+        { projectId: PROJECT, txn: "t2", at: new Date("2026-09-02T00:00:00.000Z"), by: "system", reason: "waive vì ngoài phạm vi bản này", op: "set", step_id: null, seq: 2 },
         { projectId: PROJECT, txn: "t3", at: new Date("2026-09-03T00:00:00.000Z"), by: "650000000000000000000099deadbeef", reason: "manual", op: "set", step_id: null, seq: 3 }
       ])
       userDb.setRows([{ _id: "650000000000000000000010", name: "Alice", email: "alice@example.com" }])
@@ -449,7 +454,7 @@ describe("assemble()", () => {
       await assemble(PROJECT, "Demo", 22)
       const doc = await getDocument(PROJECT, "Demo", { source: "draft" })
       crDb.rows = []
-      expect(doc.recordOfChanges[0]).toMatchObject({ in_charge: "Alice", description: "CR-001: Faster response" })
+      expect(doc.recordOfChanges[0]).toMatchObject({ in_charge: "Alice", description: "CR-001: Update non-functional requirement NFR-01" })
     })
   })
 
@@ -485,6 +490,20 @@ describe("getDocument() - source=draft", () => {
     expect((await getDraftMeta(PROJECT))?.assembled_at_version).toBe(2)
     // FLF-295: nhãn version không lộ spine_version
     expect(doc.version).toBe("v0")
+  })
+
+  it("FLF-484: dự án mode 1 (có DocVersion) ⇒ nhãn là số version mới nhất, kể cả khi bản cache dựng lúc nhãn cũ", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 1 }))
+    docVersionDb.versions = ["0.1", "0.2"]
+    try {
+      await assemble(PROJECT, "Demo", 1)
+      expect((await getDocument(PROJECT, "Demo", { source: "draft" })).version).toBe("0.2")
+      // version mới (CR chỉ có comment) mà spine_version không đổi ⇒ cache giữ nhãn cũ, nhưng bản trả về theo nhãn mới
+      docVersionDb.versions = ["0.1", "0.2", "0.10"]
+      expect((await getDocument(PROJECT, "Demo", { source: "draft" })).version).toBe("0.10")
+    } finally {
+      docVersionDb.versions = []
+    }
   })
 
   it("flagsAppendix: cờ đỏ mở + waive đúng", async () => {
@@ -610,6 +629,56 @@ describe("getDocument() - source=draft", () => {
 
     expect((await getDraftMeta(PROJECT))?.assembled_at_version).toBe(1)
     expect(doc.version).toBe("v0")
+  })
+})
+
+describe("phiên bản định dạng của document cache (FLF-443)", () => {
+  it("hàng cache mới ghi mang format_version hiện tại", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 1 }))
+    await getDocument(PROJECT, "Demo", { source: "draft" })
+    expect(cacheDb.docs.map((d) => d.format_version)).toEqual([RENDER_FORMAT_VERSION])
+  })
+
+  it("draft: hàng cache ghi bằng định dạng cũ (không có format_version) ⇒ dựng lại đè lên cùng hàng, không thêm hàng", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 1 }))
+    await getDocument(PROJECT, "Demo", { source: "draft" })
+    const row = cacheDb.docs[0]
+    delete row.format_version
+    row.doc = { ...(row.doc as object), watermark: "OLD-CACHE" }
+    clearDocumentMemo()
+
+    const doc = await getDocument(PROJECT, "Demo", { source: "draft" })
+
+    expect(doc.watermark).not.toBe("OLD-CACHE")
+    expect(cacheDb.docs).toHaveLength(1)
+    expect(cacheDb.docs[0].format_version).toBe(RENDER_FORMAT_VERSION)
+  })
+
+  it("assemble(): cache định dạng cũ không được coi là trúng cache", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 1 }))
+    vi.mocked(spineRepository.listChanges).mockResolvedValue([])
+    await assemble(PROJECT, "Demo", 1)
+    cacheDb.docs[0].format_version = RENDER_FORMAT_VERSION - 1
+    cacheDb.findOneAndUpdate.mockClear()
+
+    await assemble(PROJECT, "Demo", 1)
+
+    expect(cacheDb.findOneAndUpdate).toHaveBeenCalledTimes(1)
+    expect(cacheDb.docs[0].format_version).toBe(RENDER_FORMAT_VERSION)
+  })
+
+  it("baseline đã cache ở định dạng cũ cũng dựng lại từ snapshot", async () => {
+    baselineDb.findOne.mockResolvedValue({ _id: BASELINE_ID, projectId: PROJECT, version: "v1.0", at: new Date().toISOString(), checked_at_version: 9, waived_count: 0, snapshot: baseSpine() })
+    await getDocument(PROJECT, "Demo", { source: "baseline", baseline_id: BASELINE_ID })
+    expect(baselineDb.findOne).toHaveBeenCalledTimes(1)
+    delete cacheDb.docs.find((d) => d.baseline_id === BASELINE_ID)!.format_version
+    clearDocumentMemo()
+
+    await getDocument(PROJECT, "Demo", { source: "baseline", baseline_id: BASELINE_ID })
+
+    expect(baselineDb.findOne).toHaveBeenCalledTimes(2)
+    expect(cacheDb.docs.filter((d) => d.baseline_id === BASELINE_ID)).toHaveLength(1)
+    expect(cacheDb.docs.find((d) => d.baseline_id === BASELINE_ID)!.format_version).toBe(RENDER_FORMAT_VERSION)
   })
 })
 
@@ -763,7 +832,7 @@ describe("_internal.buildDocument - tên hệ thống (FLF-177)", () => {
   it("bìa/tiêu đề/tên file lấy project.system_name", async () => {
     const doc = await build({ ...baseSpine(), project: { ...baseSpine().project, system_name: "ShipFast Delivery" } })
     expect(doc.projectName).toBe("ShipFast Delivery")
-    expect(buildDocxFileName(doc)).toBe("ShipFast Delivery_v0.1_DRAFT.docx")
+    expect(buildDocxFileName(doc)).toBe("ShipFast Delivery_P000001_v0.1_DRAFT.docx")
   })
 
   it("chưa đặt system_name ⇒ tên project truyền vào như trước", async () => {

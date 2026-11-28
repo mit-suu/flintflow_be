@@ -57,12 +57,20 @@ export interface IProject extends Document {
    */
   documentLanguage?: UserLocale
   /**
+   * FLF-466: ngôn ngữ chữ trong Spine sau một lần dịch đè khi đổi mẫu (BF §3.7). Không default: thiếu field ⇒ suy như cũ ở
+   * `sourceLanguageOf` (import thật = ngôn ngữ file, còn lại `en`) — đừng đọc thẳng.
+   */
+  source_language?: UserLocale
+  /**
    * Ký pháp ERD của cả tài liệu (§3.1.5): `chen` | `crowsfoot` | `idef1x`. Không nằm trong Spine. FLF-418: không default — thiếu
    * field = chưa chọn (S-4.5 hỏi trong khung chat); khi vẽ đọc qua `erdNotationOf` (thiếu ⇒ `chen`), đừng đọc thẳng.
    */
   erdNotation?: ErdNotation
   /** FLF-418: mức Sequence Diagram `system` | `component`. Không default (thiếu = chưa chọn, S-5.4 lần đầu hỏi); đọc qua `sequenceLevelOf`. */
   sequenceLevel?: SequenceLevel
+  /** FLF-441: có cần Class Diagram / Sequence Diagram. Không default (thiếu = chưa hỏi ⇒ vẫn vẽ); đọc qua `diagramIncluded`. */
+  classDiagram?: boolean
+  sequenceDiagram?: boolean
   /**
    * Theme mockup §3.x.y Screen Layout (FLF-410): màu chính, domain, nền tảng. Không nằm trong Spine; đọc qua `screenThemeOf`
    * (`shared/diagram/screen-theme.ts`). Field null = chưa chọn ⇒ mặc định / suy từ `form_factor`.
@@ -166,6 +174,11 @@ const projectSchema = new Schema<IProject>(
       type: String,
       enum: [...USER_LOCALES]
     },
+    // FLF-466: KHÔNG default — thiếu field ⇒ `sourceLanguageOf` suy như trước
+    source_language: {
+      type: String,
+      enum: [...USER_LOCALES]
+    },
     // FLF-418: KHÔNG default — thiếu field = người dùng chưa chọn; giá trị khi vẽ suy ra ở `erdNotationOf`
     erdNotation: {
       type: String,
@@ -175,6 +188,9 @@ const projectSchema = new Schema<IProject>(
       type: String,
       enum: [...SEQUENCE_LEVELS]
     },
+    // FLF-441: KHÔNG default — thiếu = chưa hỏi (S-4.5 / S-5.4 hỏi trong khung chat)
+    classDiagram: { type: Boolean },
+    sequenceDiagram: { type: Boolean },
     screenTheme: {
       type: new Schema(
         {

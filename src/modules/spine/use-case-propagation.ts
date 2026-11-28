@@ -22,7 +22,18 @@ const ADD_VERB = /(thêm|bổ sung|tạo|add|create|new)/i
 // "UC", "UC01", "UC-26" (mã dính số) — `\buc\b` cũ không khớp "UC01"
 const USE_CASE_WORD = /(use[\s-]?case|\buc(?![a-z])|ca sử dụng)/i
 
-export const isAddUseCaseInstruction = (instruction: string): boolean => ADD_VERB.test(instruction) && USE_CASE_WORD.test(instruction)
+/** Phủ định đứng ngay trước một động từ: "không thêm UC nữa", "đừng xoá", "don't remove" ⇒ động từ đó không phải ý của câu. */
+const NEGATION_BEFORE = /(?:^|[^\p{L}'])(?:không|chưa|đừng|chẳng|ko|don'?t|do not|not|never)\s+$/iu
+
+/** Vị trí đầu tiên `re` khớp mà không bị phủ định ngay trước (`Infinity` khi không có). Lệnh sửa và câu trả lời giao diện dùng chung. */
+export const affirmedIndex = (re: RegExp, text: string): number => {
+  const all = new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`)
+  for (const m of text.matchAll(all)) if (!NEGATION_BEFORE.test(text.slice(Math.max(0, m.index - 12), m.index))) return m.index
+  return Infinity
+}
+
+export const isAddUseCaseInstruction = (instruction: string): boolean =>
+  affirmedIndex(ADD_VERB, instruction) !== Infinity && USE_CASE_WORD.test(instruction)
 
 /** "xoá UC phúc khảo điểm", "bỏ use case …", "remove the … use case" — câu lệnh xoá use case (FLF-318). */
 // `\b` của JS coi chữ có dấu là ngoài từ ⇒ "bỏ" dùng lookaround Unicode (không khớp "bổ sung")
@@ -35,15 +46,16 @@ export type UseCaseIntent = "add" | "remove" | "edit"
 
 /**
  * Ý của câu lệnh về use case: động từ đứng TRƯỚC thắng — "xoá use case vừa tạo" là xoá dù có chữ "tạo", "thêm UC …, bỏ
- * màn cũ" là thêm, "sửa UC X, thêm bước duyệt" là sửa. Không nhắc use case ⇒ `null`.
+ * màn cũ" là thêm, "sửa UC X, thêm bước duyệt" là sửa. Động từ bị phủ định không tính: "không thêm UC nữa, chỉ sửa UC-3" là
+ * sửa. Không nhắc use case ⇒ `null`. Chạy trước lượt gọi model (chọn ngữ cảnh đưa vào prompt) nên vẫn là luật của code.
  */
 export const useCaseIntent = (instruction: string): UseCaseIntent | null => {
   if (!USE_CASE_WORD.test(instruction)) return null
   const found = (
     [
-      ["add", ADD_VERB.exec(instruction)?.index ?? Infinity],
-      ["remove", REMOVE_VERB.exec(instruction)?.index ?? Infinity],
-      ["edit", EDIT_VERB.exec(instruction)?.index ?? Infinity]
+      ["add", affirmedIndex(ADD_VERB, instruction)],
+      ["remove", affirmedIndex(REMOVE_VERB, instruction)],
+      ["edit", affirmedIndex(EDIT_VERB, instruction)]
     ] as const
   )
     .filter(([, at]) => at !== Infinity)
@@ -85,7 +97,7 @@ export const useCaseContext = (spine: Spine, mode: UseCaseMode): Record<string, 
   return {
     mode,
     // Kiểm trùng / chồng mục tiêu với use case có sẵn của cùng actor (luật 3e) — mô tả cắt ngắn
-    use_cases: spine.use_cases.map(({ id, name, actor_ids, description }) => ({ id, name, actor_ids, description: description.slice(0, 160) })),
+    use_cases: spine.use_cases.map(({ id, name, actor_ids, function_ids, description }) => ({ id, name, actor_ids, function_ids, description: description.slice(0, 160) })),
     // FLF-318: chọn actor xử lý yêu cầu (luật 3e — giảng viên chấm lại, phòng đào tạo duyệt) — không đoán, không bịa actor
     actors: spine.actors.map(({ id, name, kind, description }) => ({ id, name, kind, description: description.slice(0, 120) })),
     features: spine.features.map(({ id, name }) => ({ id, name })),
@@ -402,6 +414,13 @@ export type EditIssue =
  * Phần lô sửa use case bỏ sót khi **đổi actor**: vai trò của actor mới chưa có quyền xem màn của use case; vai trò của actor
  * cũ vẫn còn quyền trên màn mà không use case nào khác của actor đó dùng.
  */
+/**
+ * FLF-486 (B1): hành động nào tính là "được mở màn". `view` là cách FlintFlow ghi; `access` là dấu X của ma trận phân quyền
+ * dự án import (`import/table-shape.ts` `markActions`). Hành động khác (create, update...) không tự mở màn.
+ */
+const OPENS_SCREEN = new Set(["view", "access"])
+const opensScreen = (action: string): boolean => OPENS_SCREEN.has(String(action).trim().toLowerCase())
+
 export const editIssues = (before: EditParts, after: EditParts): EditIssue[] => {
   const out: EditIssue[] = []
   const rolesOf = (spine: EditParts, actorId: string) => spine.roles.filter((r) => r.actor_id === actorId)
@@ -415,7 +434,7 @@ export const editIssues = (before: EditParts, after: EditParts): EditIssue[] => 
     const screenName = (id: string) => after.screens.find((s) => s.id === id)?.name ?? id
     for (const screen of screens) {
       for (const role of added.flatMap((a) => rolesOf(after, a))) {
-        if (!after.permissions.some((p) => p.screen_id === screen && p.role_id === role.id && p.action === "view")) {
+        if (!after.permissions.some((p) => p.screen_id === screen && p.role_id === role.id && opensScreen(p.action))) {
           out.push({ kind: "new_actor_no_view", use_case: uc.name, role: role.name, screen: screenName(screen) })
         }
       }
@@ -463,7 +482,7 @@ export type UseCaseScreenIssue =
   | { kind: "no_screen"; use_case: string; name: string }
   | { kind: "shared_new_screen"; use_case: string; name: string; other: string; screen: string }
   | { kind: "no_edge"; use_case: string; screen: string }
-  | { kind: "no_view"; use_case: string; role: string }
+  | { kind: "no_view"; use_case: string; role: string; name?: string }
   | { kind: "not_chained"; use_case: string; name: string; screens: string[] }
   | { kind: "no_use_case" }
   | { kind: "not_in_actor_flow"; use_case: string; screen: string; from: string[] }
@@ -513,7 +532,7 @@ export const newUseCaseScreenIssues = (
     }
     const roles = after.roles.filter((r) => r.actor_id !== null && uc.actor_ids.includes(r.actor_id) && human.has(r.actor_id))
     // Màn vào của use case phải mở từ màn mà vai trò của actor xem được — không thì không nằm trong screen flow của actor
-    const viewable = new Set(after.permissions.filter((p) => p.action === "view" && roles.some((r) => r.id === p.role_id)).map((p) => p.screen_id))
+    const viewable = new Set(after.permissions.filter((p) => opensScreen(p.action) && roles.some((r) => r.id === p.role_id)).map((p) => p.screen_id))
     for (const entry of fresh) {
       const from = after.screens.filter((s) => !screens.includes(s.id) && s.flow_to.some((e) => e.to === entry))
       // Màn không có dòng quyền nào (Login, màn công khai) ⇒ ai cũng mở được
@@ -522,8 +541,8 @@ export const newUseCaseScreenIssues = (
       issues.push({ kind: "not_in_actor_flow", use_case: uc.id, screen: nameOf.get(entry) ?? entry, from: from.map((s) => s.name) })
     }
     for (const role of roles) {
-      if (screens.some((s) => after.permissions.some((p) => p.screen_id === s && p.role_id === role.id && p.action === "view"))) continue
-      issues.push({ kind: "no_view", use_case: uc.id, role: role.name })
+      if (screens.some((s) => after.permissions.some((p) => p.screen_id === s && p.role_id === role.id && opensScreen(p.action)))) continue
+      issues.push({ kind: "no_view", use_case: uc.id, role: role.name, name: uc.name })
     }
   }
   return issues
@@ -539,7 +558,7 @@ export const useCaseScreenProblemText = (issue: UseCaseScreenIssue): string => {
     case "no_edge":
       return `New screen "${issue.screen}" of ${issue.use_case} has no edge into it: set flow_to on the screen that opens it (rule 3e).`
     case "no_view":
-      return `Role "${issue.role}" of ${issue.use_case} has no view permission on its screen: add a permissions[] row (rule 3e).`
+      return `Role "${issue.role}" of use case ${issue.name ? `"${issue.name}"` : issue.use_case} has no view permission on its screen: add a permissions[] row (rule 3e). Keep this use case and its actors as they are; only add the missing permissions[] row with action "view" (or the action the project's matrix already uses).`
     case "not_in_actor_flow":
       return `New screen "${issue.screen}" of ${issue.use_case} opens only from ${issue.from.map((n) => `"${n}"`).join(", ")}, which its actor's role cannot view: open it from a screen in that actor's flow (rule 3e).`
     case "no_use_case":
@@ -838,19 +857,25 @@ export const screenKindQuestion = (
     const offered = ordered.filter((u) => u.proposed).map((u, i) => describeItem(u, i + requested.length, language))
     const anyProposed = offered.length > 0
     const lines = [DETAILED_HEADER[language], ...requested, ...(anyProposed ? [PROPOSED_HEADER[language], ...offered] : [])]
+    // FLF-486 (B4): một use case nhiều màn => lựa chọn nói về "bước", tránh đọc thành "mỗi vai một use case"
+    const single = requested.length === 1 && !anyProposed
     if (language === "en") {
       return {
         text: `${lines.join("\n")}\nHow should each look: its own screen, a popup${host ? ` opened from "${host}"` : ""}, an existing screen, or one shared screen? Answer per number or per screen, e.g. "1 own screen, step “Confirm” is a popup; 2 and 3 share one screen${anyProposed ? "; drop 4" : ""}".`,
         choices: anyProposed
           ? ["Keep all, each its own screen", "Drop the proposed use cases", "One shared screen"]
-          : ["Each use case its own screen", "One shared screen", host ? `Popups opened from ${host}` : "Popups"]
+          : single
+            ? ["Each step its own screen", "Merge the steps into one screen", host ? `Popup opened from ${host}` : "Popup"]
+            : ["Each use case its own screen", "One shared screen", host ? `Popups opened from ${host}` : "Popups"]
       }
     }
     return {
       text: `${lines.join("\n")}\nMỗi use case dùng giao diện nào: màn hình riêng, popup${host ? ` mở từ "${host}"` : ""}, màn có sẵn, hay dùng chung một màn? Trả lời theo số hoặc theo màn, vd. "1 màn riêng, bước “Confirm” là popup; 2 và 3 dùng chung một màn${anyProposed ? "; bỏ 4" : ""}".`,
       choices: anyProposed
         ? ["Giữ tất cả, mỗi use case màn riêng", "Bỏ các use case AI đề xuất", "Dùng chung một màn hình"]
-        : ["Mỗi use case một màn hình riêng", "Dùng chung một màn hình", host ? `Popup mở từ ${host}` : "Popup"]
+        : single
+          ? ["Mỗi bước một màn riêng", "Gộp các bước vào một màn", host ? `Popup mở từ ${host}` : "Popup"]
+          : ["Mỗi use case một màn hình riêng", "Dùng chung một màn hình", host ? `Popup mở từ ${host}` : "Popup"]
     }
   }
   const name = String(added[0].name ?? "")
@@ -947,9 +972,20 @@ const SCREEN_POPUP = /(?:bước|màn(?: hình)?|step|screen)\s+["“]?([^"”,;
 /** Bỏ use case AI đề xuất (không kèm số). */
 const DROP_PROPOSED = /(bỏ|không cần|drop|remove)[^,;\n]*(đề xuất|proposed)/i
 
+/**
+ * "không cần popup", "không cần màn riêng", "no need for a popup": "không cần" ở đây bỏ một KIỂU giao diện, không bỏ use case
+ * ⇒ cắt cụm đó trước khi đọc (phần còn lại, vd "làm màn riêng", mới là lựa chọn).
+ */
+const REJECTED_UI = /(?<!\p{L})(?:không cần|ko cần|no need for)\s+(?:an?\s+)?(?:pop[\s-]?up|hộp thoại|dialog|modal|màn(?: hình)?(?: riêng| mới| chung)?|dùng chung|separate screen|new screen)/giu
+
+/** Phần câu còn lại sau khi bỏ chữ phủ định đi kèm động từ bỏ ("không bỏ", "đừng xoá", "don't drop") và kiểu giao diện bị chê. */
+const withoutNegations = (text: string): string =>
+  text.replace(REJECTED_UI, " ").replace(/(?<!\p{L})(?:không|chưa|đừng|chẳng|ko|don'?t|do not|not|never)\s+(?:bỏ|xoá|xóa|drop|remove|skip)(?!\p{L})/giu, " ")
+
 const classify = (text: string): { kind: UiChoiceKind; screen?: string } | null => {
   const host = HOST.exec(`${text}\n`)?.[1]?.trim()
-  if (SHARED_WORDS.test(text) || /\bchung\b/i.test(text)) return { kind: "shared" }
+  // Chỉ cụm "dùng chung / chung một màn…" — chữ "chung" trơn ("nói chung là màn riêng") không phải lựa chọn
+  if (SHARED_WORDS.test(text)) return { kind: "shared" }
   if (POPUP_WORDS.test(text)) return { kind: "popup", ...(host ? { screen: host } : {}) }
   if (EXISTING_WORDS.test(text)) return { kind: "existing", ...(host ? { screen: host } : {}) }
   if (SCREEN_WORDS.test(text) || OWN_WORDS.test(text)) return { kind: "own" }
@@ -959,7 +995,7 @@ const classify = (text: string): { kind: UiChoiceKind; screen?: string } | null 
 /** Một đoạn trả lời ⇒ phần của nó trong kế hoạch: bỏ / gộp màn / màn nào là popup / kiểu giao diện. */
 const segmentChoice = (raw: string): Partial<UiPlanEntry> | null => {
   const popupScreens = [...raw.matchAll(SCREEN_POPUP)].map((m) => m[1].trim())
-  const text = raw.replace(SCREEN_POPUP, " ")
+  const text = withoutNegations(raw.replace(SCREEN_POPUP, " "))
   if (DROP_WORDS.test(text) && !KEEP_WORDS.test(text)) return { drop: true }
   const choice = classify(text)
   const merge = MERGE_WORDS.test(text)
@@ -984,12 +1020,15 @@ export const parseUiAnswer = (input: string, asked: readonly (string | AskedUseC
     const e = entries.get(index)
     if (e) entries.set(index, { ...e, ...part, popupScreens: [...(e.popupScreens ?? []), ...(part.popupScreens ?? [])] })
   }
-  if (DROP_PROPOSED.test(answer)) for (const [i, u] of items.entries()) if (u.proposed) set(i + 1, { drop: true })
+  // "không bỏ các use case AI đề xuất" = giữ
+  if (affirmedIndex(DROP_PROPOSED, answer) !== Infinity) for (const [i, u] of items.entries()) if (u.proposed) set(i + 1, { drop: true })
   // Cắt cụm "bỏ các use case AI đề xuất" khỏi câu: chữ "bỏ" trong đó không thuộc về số đứng trước ("1 màn riêng, bỏ …")
   answer = answer.replace(new RegExp(DROP_PROPOSED.source, "gi"), " ")
   // "bỏ 4", "giữ 2 và 3": áp rồi cắt khỏi câu; phần còn lại đọc theo kiểu "<số> <lựa chọn>"
   for (const m of answer.matchAll(VERB_FIRST)) {
-    const drop = DROP_WORDS.test(m[1])
+    // "không bỏ 3" = giữ 3
+    const negated = NEGATION_BEFORE.test(answer.slice(Math.max(0, m.index - 12), m.index))
+    const drop = DROP_WORDS.test(m[1]) && !negated
     for (const n of m[2].matchAll(/\d+/g)) if (Number(n[0]) >= 1 && Number(n[0]) <= items.length) set(Number(n[0]), { drop })
   }
   answer = answer.replace(VERB_FIRST, " ")
@@ -1006,6 +1045,47 @@ export const parseUiAnswer = (input: string, asked: readonly (string | AskedUseC
     if (part) for (const index of s.indices) set(index, { ...part, ...(part.kind === "shared" ? { group: g + 1 } : {}) })
   })
   return [...entries.values()].map((e) => (e.popupScreens?.length ? e : (({ popupScreens: _p, ...rest }) => rest)(e))).filter((e) => Object.keys(e).length > 3 || e.proposed)
+}
+
+/** Một mục `ui_plan` model trả (`apply-change-op`): số thứ tự theo câu hỏi giao diện đã hỏi. */
+export interface ModelUiPlanItem {
+  index: number
+  drop?: boolean
+  ui?: UiChoiceKind
+  screen?: string
+  group?: number
+  merge?: boolean
+  popup_screens?: string[]
+}
+
+/**
+ * Kế hoạch giao diện do model đọc từ câu trả lời của người dùng — model hiểu câu chữ ("không bỏ 3", "thôi 2 làm popup
+ * mở từ Dashboard"), code chỉ kiểm: số phải thuộc danh sách đã hỏi, kiểu phải đúng enum. Use case AI đề xuất mà model
+ * không nhắc vẫn giữ mục (như `parseUiAnswer`). Không có mục hợp lệ nào ⇒ `null` (dùng cách đọc của code).
+ */
+export const uiPlanFromModel = (items: readonly ModelUiPlanItem[] | undefined, asked: readonly AskedUseCase[]): UiPlanEntry[] | null => {
+  if (!items?.length || asked.length === 0) return null
+  const byIndex = new Map<number, ModelUiPlanItem>()
+  for (const item of items) if (Number.isInteger(item.index) && item.index >= 1 && item.index <= asked.length) byIndex.set(item.index, item)
+  if (byIndex.size === 0) return null
+  return asked.flatMap((u, i): UiPlanEntry[] => {
+    const item = byIndex.get(i + 1)
+    if (!item) return u.proposed ? [{ index: i + 1, name: u.name, proposed: true }] : []
+    const popupScreens = (item.popup_screens ?? []).map((s) => s.trim()).filter(Boolean)
+    return [
+      {
+        index: i + 1,
+        name: u.name,
+        proposed: u.proposed,
+        ...(item.drop ? { drop: true } : {}),
+        ...(!item.drop && item.ui ? { kind: item.ui } : {}),
+        ...(!item.drop && item.ui === "shared" ? { group: item.group && item.group > 0 ? item.group : 1 } : {}),
+        ...(!item.drop && item.screen?.trim() && (item.ui === "popup" || item.ui === "existing") ? { screen: item.screen.trim() } : {}),
+        ...(!item.drop && item.merge ? { merge: true } : {}),
+        ...(!item.drop && popupScreens.length ? { popupScreens } : {})
+      }
+    ]
+  })
 }
 
 /** Kế hoạch giao diện của lượt này: danh sách của câu hỏi chi tiết gần nhất + câu trả lời (câu lệnh hiện tại). */
@@ -1252,4 +1332,21 @@ export const uiPlanNote = (issues: readonly UiPlanIssue[], language: "vi" | "en"
     }
   }
   return issues.map(vi).join("\n")
+}
+
+// ─── FLF-469: CR thêm / xoá cả một chức năng ⇒ gắn vào use case có sẵn / use case hết chức năng thì xoá (luật 3i, 3j) ───
+
+type FunctionLinkParts = Pick<Spine, "use_cases" | "functions">
+
+/** Chức năng có ở `after` mà `before` chưa có và không use case nào của `after` liệt kê. */
+export const unlinkedNewFunctions = (before: FunctionLinkParts, after: FunctionLinkParts): { id: string; name: string }[] => {
+  const existed = new Set(before.functions.map((f) => f.id))
+  const linked = new Set(after.use_cases.flatMap((u) => u.function_ids))
+  return after.functions.filter((f) => !existed.has(f.id) && !linked.has(f.id)).map(({ id, name }) => ({ id, name }))
+}
+
+/** Use case còn ở `after` nhưng vừa hết chức năng (trước đó có ít nhất một). */
+export const emptiedUseCases = (before: FunctionLinkParts, after: FunctionLinkParts): { id: string; name: string }[] => {
+  const old = new Map(before.use_cases.map((u) => [u.id, u]))
+  return after.use_cases.filter((u) => u.function_ids.length === 0 && (old.get(u.id)?.function_ids.length ?? 0) > 0).map(({ id, name }) => ({ id, name }))
 }

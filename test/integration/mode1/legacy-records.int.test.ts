@@ -13,7 +13,8 @@ import { makeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
 import { getImportResponseSchema } from "../../../src/modules/import/import.dto.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
-import { runExtraction } from "../../../src/modules/import/extract.service.js"
+import { runExtraction } from "../../helpers/mode1-import-p4.js"
+import { runExtraction as runExtractionRaw } from "../../../src/modules/import/extract.service.js"
 import { chainFinalize } from "../../../src/modules/import/extract-jobs.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 
@@ -64,17 +65,29 @@ describe("FLF-343 - bản ghi cũ", () => {
     for (const h of after.heading_map.filter((x) => low.includes(x.block_id))) expect(h).toMatchObject({ confirmed: true, auto_confirmed: true })
   })
 
-  it("fields_review: Tiếp tục ⇒ baseline 0.1 + cờ Cần xem, tới gap_review", async () => {
+  it("fields_review: FLF-462 (đảo FLF-343) - còn field chưa xác nhận ⇒ Tiếp tục bị chặn; xác nhận rồi mới ⇒ baseline 0.1, tới gap_review", async () => {
     const { c, id, projectId, seeded } = await uploaded()
-    await runExtraction(projectId, seeded.userId, id)
+    // runExtraction thô (không qua helper tự xác nhận) để field độ tin thấp của fixture giữ nguyên chưa xác nhận,
+    // đúng kịch bản "bản ghi cũ" dừng ở fields_review mà chưa ai xác nhận
+    const run = await runExtractionRaw(projectId, seeded.userId, id)
+    expect(run.doc.status).toBe("fields_review")
     await ImportedDocument.updateOne({ _id: id }, { $set: { status: "fields_review", paused: null } })
 
+    // FLF-462: bản ghi cũ cũng phải qua xác nhận trước - không còn tự "Tiếp tục" thẳng sang baseline như FLF-343
+    const blocked = await c.post("/import/resume", { import_id: id })
+    expect(blocked.status).toBe(409)
+    expect(blocked.body.error.code).toBe("IMPORT_INVALID_STATE")
+
+    const confirmed = await c.patch("/import/fields", { import_id: id, confirm_all: true })
+    expect(confirmed.status, JSON.stringify(confirmed.body.error)).toBe(200)
     const resumed = await c.finalizeAndWait(id, {}, "/import/resume")
     expect(resumed.res.status, JSON.stringify(resumed.res.body.error)).toBe(200)
     expect(resumed.view?.import).toMatchObject({ status: "gap_review", paused: null })
     const spine = (await spineRepository.get(projectId))!
     expect(spine.baselines.find((b) => b.type === "imported")).toMatchObject({ version: "0.1" })
-    expect(spine.flags.filter((f) => f.rule_id === "import_needs_review" && f.resolved_at === null).length).toBeGreaterThan(0)
+    // FLF-462: field đã xác nhận ở bước 1.6 trước khi vào baseline ⇒ không còn cờ vàng "Cần xem" cho field (khác FLF-343 cũ)
+    const fieldFlags = spine.flags.filter((f) => f.rule_id === "import_needs_review" && f.resolved_at === null && f.target_id?.startsWith("functions["))
+    expect(fieldFlags).toEqual([])
   })
 
   it("bật finalize nối tiếp lỗi ⇒ không ném ra job I-4, import baselining + paused resume_later", async () => {

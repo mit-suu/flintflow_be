@@ -100,7 +100,7 @@ interface ClassBox {
 const classBox = (n: ClassNodeInput, degree: number, selfLoops: number): ClassBox => {
   const o = DEFAULT_ROUTE_OPTIONS
   const nameLines = wrapLines(clean(n.name) || n.id, NAME_SIZE, MAX_NAME_WIDTH, 2)
-  const nameW = Math.max(...nameLines.map((l) => textWidth(l, NAME_SIZE, true)))
+  const nameW = Math.max(...nameLines.map((l) => textWidth(l, NAME_SIZE)))
   const rows = n.attributes.map(attributeText)
   const headerH = Math.max(34, nameLines.length * NAME_LINE + 14)
   const attrH = rows.length > 0 ? 12 + rows.length * ATTR_LINE : 0
@@ -203,7 +203,7 @@ const drawClass = (scene: Scene, b: ClassBox, placed: PlacedNode): void => {
   const { x, y, w, h } = placed.body
   scene.rect(id, x, y, w, h, { name })
   b.nameLines.forEach((line, i) =>
-    scene.text(`${id}#name-${i}`, x + w / 2, y + b.headerH / 2 + (i - (b.nameLines.length - 1) / 2) * NAME_LINE, line, { size: NAME_SIZE, bold: true, baseline: "central", owner: id })
+    scene.text(`${id}#name-${i}`, x + w / 2, y + b.headerH / 2 + (i - (b.nameLines.length - 1) / 2) * NAME_LINE, line, { size: NAME_SIZE, baseline: "central", owner: id })
   )
   if (b.rows.length === 0) return
   scene.decoration(`${id}#rule-0`, id, [[x, y + b.headerH], [x + w, y + b.headerH]])

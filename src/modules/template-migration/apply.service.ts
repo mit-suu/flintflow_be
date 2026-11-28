@@ -15,13 +15,15 @@ import { randomUUID } from "node:crypto"
 import mongoose from "mongoose"
 import { ChangeRequest } from "../change-request/change-request.model.js"
 import type { CrStatus } from "../change-request/change-request.state.js"
-import { ensureTemplateMigrationCr, revertTemplateMigrationChanges, writeTemplateMigrationOps } from "../change-request/write.service.js"
+import { revertTemplateMigrationChanges, writeTemplateMigrationOps } from "../change-request/write.service.js"
 import { docFileStore } from "../doc-version/doc-file.store.js"
 import { latestDocVersion } from "../doc-version/doc-version.service.js"
+import { systemChangeActor } from "../doc-version/doc-version.constants.js"
+import { recordSystemChange } from "../doc-version/system-change.service.js"
 import { ChangeLocation } from "../change-request/change-location.model.js"
 import { stripRecord } from "../import/check.service.js"
 import { carriedMissingSections, mode1RuleProfileFor, type CarryProfile } from "../import/mode1-guard.js"
-import { findVersion, createProjectVersion, discardProjectVersion, toColumns, type TemplateActor } from "../import/org-template-versions.service.js"
+import { analyzeTemplateFile, findVersion, createProjectVersion, discardProjectVersion, toColumns, type TemplateActor } from "../import/org-template-versions.service.js"
 import { refreshSegmentHashes } from "../import/finalize.service.js"
 import { TemplateProfile, type ITemplateProfile, type TableMapEntry } from "../import/template-profile.model.js"
 import { sourceLanguageOf } from "../project/document-language.js"
@@ -39,9 +41,9 @@ import type { TranslationUnit } from "../translation/translation-units.js"
 import type { TranslateDocumentExecutor } from "../translation/translation-run.service.js"
 import { toUserLocale } from "../../shared/i18n/locale.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { addCustomOps, affectedSectionIds, customIdAllocator, deleteOps, migrationTxn, ownerKeysOf, selectReverseChanges, withSnapshotContinuations } from "./apply-plan.js"
-import { BuildBaseFileError, buildBaseFile, planLayout, type PlannedLayout } from "./build-base-file.js"
-import { missingAfterMoves } from "./classify.js"
+import { addCustomOps, affectedSectionIds, customIdAllocator, migrationTxn, ownerKeysOf, selectReverseChanges, withSnapshotContinuations } from "./apply-plan.js"
+import { BuildBaseFileError, buildBaseFile, planLayout, sourceOf, type PlannedLayout } from "./build-base-file.js"
+import { DROP_FROM_PRINT, missingAfterMoves, readChoice } from "./classify.js"
 import { composeProfile } from "./compose-profile.js"
 import { editedSections, sectionKeyResolver } from "./edited-since.js"
 import {
@@ -66,7 +68,7 @@ import {
 import { resolveAiChoices, type ResolveExecutor, type ResolveResult } from "./resolve-step.js"
 import { translateForMigration, type TranslateStepResult } from "./translate-step.js"
 
-export type ApplyStepName = "claimed" | "translated" | "snapshot" | "file" | "spine" | "profile"
+export type ApplyStepName = "claimed" | "translated" | "snapshot" | "file" | "spine" | "profile" | "version"
 
 export interface ApplyOptions {
   /** Gọi sau mỗi bước xong. Ném ở đây = lỗi giả lập ở đúng bước đó (test) — như một lỗi thật của bước kế tiếp. */
@@ -77,7 +79,7 @@ export interface ApplyOptions {
   resolveExecutor?: ResolveExecutor
 }
 
-export const NO_STEPS: ApplySteps = { snapshot: false, file: false, spine: false, profile: false }
+export const NO_STEPS: ApplySteps = { snapshot: false, file: false, spine: false, profile: false, version: false }
 
 type ProfileLean = Partial<ITemplateProfile> & Record<string, unknown>
 
@@ -133,7 +135,7 @@ const bounceToDecisions = async (ctx: MigrationContext, doc: ITemplateMigration,
   throw stale(reason)
 }
 
-const OPEN_CR_EXCLUDED: CrStatus[] = ["written", "rejected", "cancelled"]
+const OPEN_CR_EXCLUDED: CrStatus[] = ["written", "released", "rejected", "cancelled"]
 
 const recheck = async (ctx: MigrationContext, doc: ITemplateMigration): Promise<void> => {
   const spine = await loadReadySpine(ctx.projectId)
@@ -176,6 +178,8 @@ export interface SpineWork {
   /** Spine sau khi đảo + ghi op (kết quả chạy khô) — nguồn dựng các mục từ Spine. */
   planned: Spine
   translation: TranslateStepResult | null
+  /** Cảnh báo của bước AI (vd AI không chuyển được chữ thành dữ liệu có cấu trúc ⇒ đã chuyển nguyên văn) — báo cho BA sau áp dụng. */
+  resolveWarnings?: string[]
 }
 
 type ResolveRunner = (spine: Spine) => Promise<ResolveResult>
@@ -189,7 +193,8 @@ const planInput = (doc: ITemplateMigration, spine?: Pick<Spine, "functions" | "u
   pairing: doc.pairing,
   groups: doc.groups,
   decisions: decisions ?? doc.decisions.map((d) => ({ id: d.id, choice: d.choice })),
-  targetIsSnapshot: doc.direction === "reverse" && !!doc.reverse_of
+  targetIsSnapshot: doc.direction === "reverse" && !!doc.reverse_of,
+  ...(doc.analysis?.target_numbering ? { numbering: doc.analysis.target_numbering } : {})
 })
 
 const rejected = (doc: ITemplateMigration, err: TransactionRejectedError): ApiError =>
@@ -234,8 +239,8 @@ export const planSpineWork = async (wc: WorkContext, translate: TranslateRunner,
   const resolved = await resolve(afterRevert)
   const layout: PlannedLayout = planLayout(planInput(doc, wc.spine, resolved.decisions), customId)
   if (snapshotMode && prior) layout.entries = withSnapshotContinuations(layout.entries, prior.from.headings)
-  // Mục riêng đã được lô đảo xử lý (vd khôi phục / bỏ mục do lần đổi mẫu trước thêm) thì không xoá lần nữa
-  const baseOps = [...deleteOps({ groups: doc.groups, decisions: resolved.decisions }, doc.from.headings, afterRevert), ...addCustomOps(layout.newCustoms), ...resolved.ops]
+  // FLF-466: đổi mẫu không xoá mục riêng nào của tài liệu (nhóm Thừa chỉ giữ / chuyển / không in ra)
+  const baseOps = [...addCustomOps(layout.newCustoms), ...resolved.ops]
   if (options.dryRun !== false) dry(afterRevert, baseOps)
 
   let translation: TranslateStepResult | null = null
@@ -246,7 +251,7 @@ export const planSpineWork = async (wc: WorkContext, translate: TranslateRunner,
   }
   const ops = [...baseOps, ...(translation?.ops ?? [])]
   const planned = options.dryRun === false ? afterRevert : dry(afterRevert, ops)
-  return { decisions: resolved.decisions, revert, ops, keepKeys, layout, planned, translation }
+  return { decisions: resolved.decisions, revert, ops, keepKeys, layout, planned, translation, resolveWarnings: resolved.warnings }
 }
 
 // ─── dịch ────────────────────────────────────────────────────────
@@ -276,7 +281,8 @@ const translateRunner =
 /** Dự án từng theo mẫu tự do: đăng ký file nền cũ thành bản riêng của dự án để đổi ngược có đích (đích đổi ngược phải là một bản mẫu). */
 const registerSnapshotVersion = async (ctx: MigrationContext, doc: ITemplateMigration, profile: ProfileLean | null, projectName: string): Promise<MigrationSnapshot["registered_ref"]> => {
   const ref = profile?.source_file_ref
-  if (!ref || doc.from.template_ref) return null
+  // Mẫu trước là mẫu chuẩn FlintFlow: đổi ngược về đó dùng `{ kind: "standard" }`, không đăng ký file nền thành bản riêng
+  if (!ref || doc.from.template_ref || doc.from.standard) return null
   try {
     const buffer = await docFileStore().load(ref)
     const headings = doc.from.headings.filter((h) => h.heading_text.trim()).map((h) => ({ heading_text: h.heading_text, section_id: h.section_id }))
@@ -308,6 +314,7 @@ const takeSnapshot = async (ctx: MigrationContext, doc: ITemplateMigration, prof
     template_ref: project.template_ref ? { template_id: project.template_ref.template_id, version: project.template_ref.version } : null,
     template_intent: project.template_intent ?? null,
     document_language: project.documentLanguage ?? null,
+    source_language: project.source_language ?? null,
     registered_ref
   }
   await markStep(doc, "snapshot", { snapshot })
@@ -335,6 +342,12 @@ const loadSource = async (profile: ProfileLean | null): Promise<Buffer | null> =
   }
 }
 
+/** `section_id` của mục cũ có quyết định "Không in ra" (mục thừa, Record of Changes mất chỗ). */
+const printSuppressedOf = (doc: ITemplateMigration, decisions: readonly { id: string; choice: string }[]): string[] => {
+  const choice = new Map(decisions.map((d) => [d.id, readChoice(doc.groups, d.id, d.choice)]))
+  return doc.groups.extra.filter((e) => choice.get(e.id) === DROP_FROM_PRINT).map((e) => e.section_id)
+}
+
 /** Layout dùng để dựng bản in từ Spine cho các mục của file mới: theo layout dự kiến, giữ phần còn lại của profile cũ. */
 const renderLayoutOf = (doc: ITemplateMigration, work: SpineWork, profile: ProfileLean | null): TemplateLayout => {
   const translated = doc.needs_translation && doc.direction === "forward"
@@ -345,9 +358,17 @@ const renderLayoutOf = (doc: ITemplateMigration, work: SpineWork, profile: Profi
     legacyRecord: (profile?.legacy_record_of_changes ?? []) as TemplateLayout["legacyRecord"],
     ...(profile?.non_screen_table?.length ? { nonScreenTable: profile.non_screen_table } : {}),
     ...(!translated && profile?.function_originals?.length ? { functionOriginals: profile.function_originals as TemplateLayout["functionOriginals"] } : {}),
-    ...(profile?.section_slices?.length ? { sectionSlices: profile.section_slices } : {}),
+    ...(profile?.section_slices?.length || work.layout.slices.length ? { sectionSlices: [...(profile?.section_slices ?? []), ...work.layout.slices] } : {}),
+    printSuppressed: printSuppressedOf(doc, work.decisions),
+    ...(work.layout.renumbered.size ? { headingRenames: [...work.layout.renumbered].map(([from, to]) => ({ from, to })) } : {}),
     ...(!translated && profile?.section_segments?.length ? { sectionSegments: profile.section_segments } : {})
   }
+}
+
+/** Cột bảng đã biết của mẫu đích: mẫu org theo bản mẫu; mẫu chuẩn đọc lại từ file chuẩn (mapping dựng sẵn). */
+const targetColumns = async (ctx: MigrationContext, doc: ITemplateMigration): Promise<{ header: string; field_path: string | null }[]> => {
+  if (doc.to.standard) return (await analyzeTemplateFile(await loadTarget(doc)).catch(() => null))?.table_map ?? []
+  return await findVersion(ctx.orgId, String(doc.to.template_id), doc.to.version).then((v) => v.table_map).catch(() => [])
 }
 
 const buildFile = async (ctx: MigrationContext, doc: ITemplateMigration, work: SpineWork, profile: ProfileLean | null, changes: Change[], spine: Spine): Promise<void> => {
@@ -372,12 +393,14 @@ const buildFile = async (ctx: MigrationContext, doc: ITemplateMigration, work: S
     groups: doc.groups,
     decisions: work.decisions,
     direction: doc.direction,
-    source: sourceBuffer ? { buffer: sourceBuffer, headingKeys: doc.from.headings.filter((h) => h.heading_text.trim()).map((h) => h.key) } : null,
+    source: sourceBuffer ? sourceOf(sourceBuffer, doc.from.headings) : null,
     spineOnly,
     needsTranslation: translated,
     renderFromSpine,
     ...(profile?.legacy_record_of_changes ? { legacyRecordCount: (profile.legacy_record_of_changes as unknown[]).length } : {}),
     targetIsSnapshot: !!planInput(doc).targetIsSnapshot,
+    plannedLayout: work.layout,
+    ...(planInput(doc).numbering ? { numbering: planInput(doc).numbering } : {}),
     hasSpineElements: planInput(doc, work.planned).hasSpineElements
   }).catch((err: unknown) => {
     if (err instanceof BuildBaseFileError) throw new ApiError(422, "Không dựng được file nền mới từ mẫu đích: số heading của file không khớp mapping đã lưu.", "TEMPLATE_MIGRATION_BUILD_FAILED", { reason: err.code })
@@ -386,11 +409,18 @@ const buildFile = async (ctx: MigrationContext, doc: ITemplateMigration, work: S
   if (result.problems.length) {
     throw new ApiError(422, "File nền mới dựng ra không qua kiểm cấu trúc, chưa áp dụng gì.", "TEMPLATE_MIGRATION_BUILD_FAILED", { problems: result.problems.slice(0, 10) })
   }
+  // Mục có dữ liệu mà file nền không có chỗ ghi: lưu file đó thì bản xuất in mục rỗng (workspace vẫn đủ) ⇒ dừng, chưa ghi gì
+  if (result.unwritten.length) {
+    const names = result.unwritten.slice(0, 5).map((u) => `"${u.heading}"`).join(", ")
+    throw new ApiError(422, `Không ghi được nội dung của ${result.unwritten.length} mục vào file theo mẫu mới (${names}${result.unwritten.length > 5 ? ", …" : ""}), chưa áp dụng gì.`, "TEMPLATE_MIGRATION_BUILD_FAILED", {
+      unwritten: result.unwritten.slice(0, 20)
+    })
+  }
 
   const ref = await docFileStore().save(result.buffer, { projectId: ctx.projectId, kind: "upload", name: `template-migration-${String(doc._id)}.docx` })
   try {
     const known = [
-      ...((await findVersion(ctx.orgId, String(doc.to.template_id), doc.to.version).then((v) => v.table_map).catch(() => [])) as { header: string; field_path: string | null }[]),
+      ...((await targetColumns(ctx, doc)) as { header: string; field_path: string | null }[]),
       ...(((profile?.table_map ?? []) as TableMapEntry[]).map((t) => ({ header: t.header, field_path: t.field_path })))
     ]
     const composed = await composeProfile({
@@ -398,20 +428,24 @@ const buildFile = async (ctx: MigrationContext, doc: ITemplateMigration, work: S
       plan: work.layout.entries,
       // Quyết định đã giải: mục nhận nội dung "chuyển vào" không phải viết; AI không chuyển được (về `keep_custom`) ⇒ vẫn là mục thiếu
       needsContent: new Set(missingAfterMoves(doc.groups, work.decisions).missing.filter((m) => m.needs_content).map((m) => m.new_key)),
-      knownColumns: known
+      knownColumns: known,
+      printSuppressed: printSuppressedOf(doc, work.decisions),
+      slices: work.layout.slices
     })
     // Mục của lần đổi trước còn chờ viết và vẫn là mục của mẫu đích: giữ cờ chặn phát hành dù lần này nó được ghép "khớp" với heading rỗng
     const carried = await carriedMissingSections(profile as CarryProfile | null, work.planned, new Set(work.layout.entries.filter((e) => e.new_key !== null).map((e) => e.section_id)), composed.missing_sections)
     composed.missing_sections.push(...carried)
-    const warnings = [...result.warnings, ...composed.warnings, ...result.sections.filter((s) => s.flag === "yellow").map((s) => `Mục ${s.section_id}: ${s.reason ?? "cần kiểm tra"}`)]
+    const warnings = [...(work.resolveWarnings ?? []), ...result.warnings, ...composed.warnings, ...result.sections.filter((s) => s.flag === "yellow").map((s) => `Mục ${s.section_id}: ${s.reason ?? "cần kiểm tra"}`)]
     const plan = await savePlan(doc, work, spine.spine_version)
     await markStep(doc, "file", {
       new_base_file_ref: ref,
       spine_plan: plan,
       anchor_spine: work.planned,
-      new_profile: { ...composed, source_sha256: sha256Of(result.buffer), build_warnings: warnings },
+      new_profile: { ...composed, heading_renames: [...work.layout.renumbered].map(([from, to]) => ({ from, to })), source_sha256: sha256Of(result.buffer), build_warnings: warnings },
       missing_sections: composed.missing_sections
     })
+    // Lựa chọn của BA mà AI không làm được (đã chuyển nguyên văn): hiện trong cảnh báo của lần đổi mẫu, không chỉ nằm trong profile
+    if (work.resolveWarnings?.length) await TemplateMigration.updateOne({ _id: doc._id }, { $addToSet: { warnings: { $each: work.resolveWarnings } } })
   } catch (err) {
     await docFileStore().remove(ref).catch(() => undefined)
     throw err
@@ -429,21 +463,21 @@ export const writeSpine = async (doc: ITemplateMigration, userId: string): Promi
   const ops = await loadPlanOps(plan)
   const projectId = String(doc.projectId)
   const id = String(doc._id)
-  const crId = doc.spine_cr_id ?? (await ensureTemplateMigrationCr(projectId, id, userId, `Đổi mẫu sang ${doc.to.name || "mẫu mới"}`))
-  if (!doc.spine_cr_id) await touch(doc, { spine_cr_id: crId })
+  // FLF-466: không còn CR giả — người ghi là khoá của thay đổi hệ thống (không vào Record of Changes, không là CR)
+  const by = systemChangeActor(id)
   const written = async (suffix?: "revert"): Promise<boolean> => !!(await ChangeModel.exists({ projectId, txn: migrationTxn(id, suffix) }))
-  const reason = `${crId}: đổi mẫu sang ${doc.to.name || "mẫu mới"}`
+  const reason = `Đổi mẫu sang ${doc.to.name || "mẫu mới"}`
   // Khoá lạc quan theo version lúc lập kế hoạch: Spine đổi từ đó ⇒ 409 SPINE_VERSION_CONFLICT, chưa ghi gì ⇒ phục hồi trả về `ready`.
   // Lô đầu đã ghi (chạy lại sau lỗi) thì version đã đi tiếp: lô sau theo version hiện tại.
   // Một lô op engine tăng version đúng một lần ⇒ version sau lô đảo là `base_version + 1`: lô op luôn có khoá lạc quan, kể cả khi chạy tiếp
   // sau lỗi (Spine bị người khác ghi chen ⇒ 409, không đè bản dịch chữ cũ lên sửa mới)
   if (revert.length && !(await written("revert"))) {
     await touch(doc)
-    await revertTemplateMigrationChanges(projectId, revert, { crId, txn: migrationTxn(id, "revert"), baseVersion: plan.base_version })
+    await revertTemplateMigrationChanges(projectId, revert, { by, txn: migrationTxn(id, "revert"), baseVersion: plan.base_version })
   }
   if (ops.length && !(await written())) {
     await touch(doc)
-    await writeTemplateMigrationOps(projectId, ops, { crId, txn: migrationTxn(id), reason, baseVersion: plan.base_version + (revert.length ? 1 : 0) })
+    await writeTemplateMigrationOps(projectId, ops, { by, txn: migrationTxn(id), reason, baseVersion: plan.base_version + (revert.length ? 1 : 0) })
   }
 }
 
@@ -471,7 +505,7 @@ export const writeProfileAndProject = async (doc: ITemplateMigration, now: Date 
     // Chữ đã dịch ⇒ nguyên văn / đoạn nguyên văn của file cũ không còn đúng ngôn ngữ: bản in dùng Spine
     function_originals: translated ? [] : (base?.function_originals ?? []),
     section_segments: translated ? [] : (base?.section_segments ?? []),
-    section_slices: base?.section_slices ?? [],
+    section_slices: [...(base?.section_slices ?? []), ...((np.section_slices as { custom_id: string; section_id: string; items: string[] }[] | undefined) ?? [])],
     migration_missing_sections: doc.missing_sections,
     // Mốc nguyên vẹn = Spine theo kế hoạch lúc áp dụng (không đọc Spine sống: chạy tiếp sau lỗi có thể đã lẫn sửa của người khác)
     // Chỉ đổi ngôn ngữ tài liệu (mode 2 / FPT): bản in tiếp tục từ Spine qua lớp bản dịch, không coi file nền mới là nền nguyên văn
@@ -489,17 +523,43 @@ export const writeProfileAndProject = async (doc: ITemplateMigration, now: Date 
   const language = toUserLocale(doc.to.language)
   await Project.updateOne(
     { _id: projectId },
-    { $set: { template_ref: { template_id: doc.to.template_id, version: doc.to.version }, template_intent: "fixed", ...(language ? { documentLanguage: language } : {}) } }
+    {
+      $set: {
+        // Mẫu chuẩn FlintFlow không có họ mẫu ⇒ không có `template_ref` (dự án vẫn là dự án có file nền: `migrated_base_at`)
+        template_ref: doc.to.standard ? null : { template_id: doc.to.template_id, version: doc.to.version },
+        template_intent: "fixed",
+        ...(language ? { documentLanguage: language } : {}),
+        // FLF-466: dịch đè (đổi xuôi hoặc dịch lại phần đã sửa khi đổi ngược) ⇒ chữ trong Spine nay theo ngôn ngữ của mẫu đích
+        ...(doc.needs_translation && language ? { source_language: language } : {})
+      }
+    }
   )
   if (!translated) await refreshSegmentHashes(projectId).catch((e: unknown) => console.warn("[TemplateMigration] tính lại dấu đoạn lỗi (bản in dùng Spine cho đoạn lệch):", e instanceof Error ? e.message : e))
 }
 
-export const recomputeFlags = async (projectId: string, crId: string): Promise<void> => {
+export const recomputeFlags = async (projectId: string, by: string): Promise<void> => {
   try {
-    await flagsService.recompute(projectId, { by: crId, ruleProfile: await mode1RuleProfileFor(projectId), atBaseline: true })
+    await flagsService.recompute(projectId, { by, ruleProfile: await mode1RuleProfileFor(projectId), atBaseline: true })
   } catch (err) {
-    console.warn(`[TemplateMigration] ${crId}: đã ghi nhưng tính lại cờ lỗi — cờ sẽ được tính lại ở lần recompute sau`, err)
+    console.warn(`[TemplateMigration] ${by}: đã ghi nhưng tính lại cờ lỗi — cờ sẽ được tính lại ở lần recompute sau`, err)
   }
+}
+
+/**
+ * FLF-466 (red-team #1): ghi DocVersion `system_change` của lần đổi mẫu — **sau** `profile` (file nền, profile, `template_ref`, ngôn ngữ đã ghi nên
+ * file in theo mẫu mới) và **trước** `finalizeApplied` (migration còn `applying` ⇒ `assertNoMigrationRunning` chặn ghi / phát hành khác).
+ * Idempotent theo `ref` = id lần đổi mẫu: chạy lại sau sập không sinh version thứ hai. Dự án chưa có baseline ⇒ không ghi gì.
+ */
+export const writeSystemChangeVersion = async (doc: ITemplateMigration, userId: string): Promise<void> => {
+  const translated = doc.needs_translation && doc.direction === "forward"
+  await recordSystemChange(
+    String(doc.projectId),
+    userId,
+    { type: "template_migration", ref: String(doc._id), summary: `Đổi mẫu sang ${doc.to.name || "mẫu mới"}` },
+    // D11: chỉ so nội dung; đổi mẫu có dịch ⇒ bản đánh dấu vô nghĩa
+    { tracked: translated ? "none" : "content_only" }
+  )
+  await markStep(doc, "version")
 }
 
 export const finalizeApplied = async (doc: ITemplateMigration, now: Date): Promise<ITemplateMigration> => {
@@ -509,7 +569,8 @@ export const finalizeApplied = async (doc: ITemplateMigration, now: Date): Promi
     { returnDocument: "after" }
   )
   if (!done) return (await TemplateMigration.findById(doc._id))!
-  if (done.spine_cr_id) await recomputeFlags(String(done.projectId), done.spine_cr_id)
+  // FLF-466: luôn tính lại cờ (trước đây phụ thuộc `spine_cr_id`)
+  await recomputeFlags(String(done.projectId), systemChangeActor(String(done._id)))
   return done
 }
 
@@ -521,7 +582,7 @@ export const rollbackToReady = async (doc: ITemplateMigration): Promise<void> =>
   await TemplateMigration.updateOne(
     { _id: doc._id, state: "applying", apply_token: doc.apply_token },
     {
-      $set: stateUpdate("ready", { apply_steps: { ...NO_STEPS }, new_base_file_ref: null, new_profile: null, spine_plan: null, anchor_spine: null, snapshot: null, missing_sections: [], applying_heartbeat: null, apply_token: null }),
+      $set: stateUpdate("ready", { apply_steps: { ...NO_STEPS }, new_base_file_ref: null, new_profile: null, spine_plan: null, anchor_spine: null, snapshot: null, missing_sections: [], untranslated_keys: [], applying_heartbeat: null, apply_token: null }),
       ...(failures.length ? { $push: { warnings: { $each: failures } } } : {})
     }
   )
@@ -589,6 +650,8 @@ export const applyMigration = async (ctx: MigrationContext, id: string, options:
       (afterRevert) =>
         resolveAiChoices({ doc, projectId: ctx.projectId, userId: ctx.actor.userId, spine: afterRevert, ...(options.resolveExecutor ? { executor: options.resolveExecutor } : {}), onItem: (items) => touch(doc, { resolved_items: items }) })
     )
+    // Đơn vị dịch không ra chữ dù đã thử lại — tài liệu giữ chữ gốc, lưu key để toDto() map sang tên mục báo BA (FLF-471).
+    await touch(doc, { untranslated_keys: work.translation?.untranslated_keys ?? [] })
     await step("translated")
     await beat(doc)
     await takeSnapshot(ctx, doc, profile)
@@ -603,6 +666,8 @@ export const applyMigration = async (ctx: MigrationContext, id: string, options:
     const now = new Date()
     await writeProfileAndProject((await TemplateMigration.findById(doc._id))!, now)
     await step("profile")
+    await writeSystemChangeVersion((await TemplateMigration.findById(doc._id))!, ctx.actor.userId)
+    await step("version")
     return await toDto(await finalizeApplied((await TemplateMigration.findById(doc._id))!, now))
   } catch (err) {
     if (options.recoverOnError === false || err instanceof ApplyAbortedError) throw err

@@ -6,8 +6,9 @@
  *   3. Phần chữ còn lại ⇒ `IMPORT_EXTRACT_FIELDS` (chỉ text block, G6) qua `withMeteredAi`. FLF-392: tối đa
  *      `IMPORT_EXTRACT_CONCURRENCY` section gọi AI song song (chỉ lưu output thô); cấp mã / ghép tên / lọc chạy ở bước ghép,
  *      tuần tự theo thứ tự tài liệu ⇒ kết quả như chạy tuần tự.
- *   4. Lưu `ExtractionDraft` rồi sang `baselining` (FLF-343: không dừng ở `fields_review` — field độ tin < 0.7 / đọc từ ảnh vẫn vào
- *      baseline 0.1, finalize gắn cờ vàng "Cần xem"). Job nền nối tiếp finalize (`extract-jobs.ts`).
+ *   4. Lưu `ExtractionDraft` rồi xét bước 1.6 (FLF-462): còn phần tử / đoạn lớp 4 độ tin thấp, hoặc mục tên đúng nội dung
+ *      sai chưa xác nhận ⇒ dừng ở `fields_review` (UC-22 `patchFields`); không có gì cần xác nhận ⇒ sang `baselining`
+ *      thẳng như FLF-343. Job nền nối tiếp finalize (`extract-jobs.ts`).
  * Hết credit / AI lỗi sau retry ⇒ `paused`, giữ `extract_cursor`; chạy tiếp bỏ qua section đã `done`.
  * Chưa ghi Spine: finalize áp mọi field trong một transaction.
  * Độ tin của item AI (FLF-343) = điểm AI kết hợp tín hiệu của code (`combineAiConfidence`) — điểm AI không bao giờ là tín hiệu duy nhất.
@@ -26,7 +27,17 @@ import { DocBlock, type IDocBlock } from "./doc-block.model.js"
 import { applyDropToBlocks, planDrop, textRegions } from "./drop-text.js"
 import { isPlaceholderRow, isPlaceholderText, templateMarks } from "./template-markers.js"
 import { isTemplateContent, isTemplateFile } from "./structure-preview.js"
-import { DIAGRAM_SECTIONS, DIAGRAM_TARGETS, NFR_CATEGORY_BY_SECTION, isExtractableSection, schemaExcerptFor, targetsOf } from "./extract-targets.js"
+import {
+  CONTENT_SECTION,
+  DIAGRAM_SECTIONS,
+  DIAGRAM_TARGETS,
+  NFR_CATEGORY_BY_SECTION,
+  contentSectionId,
+  isExtractableSection,
+  otherTargetsOf,
+  schemaExcerptFor,
+  targetsOf
+} from "./extract-targets.js"
 import {
   IdAllocator,
   type IdSource,
@@ -47,10 +58,10 @@ import {
   type ProvisionalEntity
 } from "./extracted-entities.js"
 import { ExtractionDraft, type ExtractedField, type ExtractionProgress, type IExtractionDraft, type RawAiStep } from "./extraction-draft.model.js"
-import { FIELD_CONFIDENCE_THRESHOLD, VISION_CONFIDENCE_CAP, needsConfirm, type FieldOrigin, type MentionEntity } from "./import.constants.js"
+import { FIELD_CONFIDENCE_THRESHOLD, UNMAPPED_SECTION, VISION_CONFIDENCE_CAP, needsConfirm, needsConfirmGuidance, type FieldOrigin, type MentionEntity } from "./import.constants.js"
 import type { FieldsPatchRequest, GetImportResponse } from "./import.dto.js"
 import { Project } from "../project/project.model.js"
-import { assertImportStatus, extractionSummary, requireImport, transitionImport } from "./import.service.js"
+import { assertImportStatus, extractionSummary, requireImport, skeletonTranslationEstimate, transitionImport } from "./import.service.js"
 import { ImportedDocument, type IImportedDocument } from "./imported-document.model.js"
 import { knownKeysText, scopeKnownKeys } from "./known-keys.js"
 import { VISION_UNAVAILABLE, withMeteredAi, type MeteredResult } from "./metered-ai.js"
@@ -67,14 +78,14 @@ import { foldText } from "./text-similarity.js"
 import { indentedCells, tableRows, tableText } from "./table-rows.js"
 import { groupOf, markActions, tableShape, type TableShape } from "./table-shape.js"
 import { FUNCTION_LABELS, USE_CASE_LABELS, functionSpecValue, readSpecLines, useCaseSpecValue } from "./spec-fields.js"
-import { TemplateProfile, type ITemplateProfile, type TableMapEntry } from "./template-profile.model.js"
+import { TemplateProfile, type HeadingMapEntry, type ITemplateProfile, type TableMapEntry } from "./template-profile.model.js"
 
 export interface ExtractionRun {
   doc: IImportedDocument
   sections: GetImportResponse["extraction"]["sections"]
 }
 
-type BlockLite = Pick<IDocBlock, "block_id" | "kind" | "text" | "section_id" | "anchor" | "image_ref" | "rows"> & Partial<Pick<IDocBlock, "mentions">>
+type BlockLite = Pick<IDocBlock, "block_id" | "kind" | "text" | "section_id" | "anchor" | "image_ref" | "rows" | "guidance_layer"> & Partial<Pick<IDocBlock, "mentions">>
 
 /** Loại mã nhận được trong chữ (mention) ⇒ mảng Spine — giữ chỗ id trước khi cấp mã mới. */
 const MENTION_ARRAYS: Readonly<Partial<Record<MentionEntity, string>>> = {
@@ -415,8 +426,8 @@ const plain = (s: string): string =>
  * - `section`: độ tin khớp mục (I-3) của section đang trích (không biết ⇒ không tính).
  */
 export const codeSignals = (
-  raw: { key?: string | null; value: Record<string, unknown>; source_block_ids: string[] },
-  ctx: { validBlocks: Set<string>; blockText?: ReadonlyMap<string, string>; knownKey?: boolean; sectionConfidence?: number | null }
+  raw: { entity?: string; key?: string | null; value: Record<string, unknown>; source_block_ids: string[] },
+  ctx: { validBlocks: Set<string>; blockText?: ReadonlyMap<string, string>; knownKey?: boolean; sectionConfidence?: number | null; ambiguous?: boolean }
 ): number[] => {
   const sources = raw.source_block_ids.filter((b) => ctx.validBlocks.has(b))
   const signals = [sources.length ? 1 : 0]
@@ -431,24 +442,52 @@ export const codeSignals = (
       const str = typeof v === "string" ? plain(v) : ""
       return str.length >= 3 && text.includes(str.slice(0, 40))
     })
-    signals.push(keyHit || valueHit ? 1 : 0)
+    // FLF-444: "đúng một đối tượng tương ứng" - mã trỏ một phần tử mà tên trỏ phần tử khác ⇒ không tính là khớp
+    signals.push((keyHit || valueHit) && !ctx.ambiguous ? 1 : 0)
   }
+  // FLF-444: qua luật Spine - phần tử có field định danh của mảng (tên, câu yêu cầu, thuật ngữ…) hoặc trỏ phần tử đã biết
+  if (raw.entity) signals.push(passesSpineShape(raw.entity, raw.value) || ctx.knownKey ? 1 : 0)
   if (typeof ctx.sectionConfidence === "number") signals.push(Math.min(1, Math.max(0, ctx.sectionConfidence)))
   return signals
+}
+
+/** FLF-444: field định danh mà Spine cần cho từng mảng (thiếu ⇒ phần tử không dựng được, không phải tín hiệu tin cậy). */
+const IDENTITY_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  nfrs: ["statement"],
+  business_rules: ["statement"],
+  common_requirements: ["statement"],
+  other_requirements: ["statement"],
+  messages: ["text"],
+  glossary: ["term"],
+  references: ["title"],
+  verifications: ["requirement_id"],
+  permissions: ["screen_id", "role_id"]
+}
+
+/** Phần tử có đủ field định danh của mảng; `project` luôn đạt (field nào cũng là một sự thật riêng). */
+export const passesSpineShape = (entity: string, value: Record<string, unknown>): boolean => {
+  if (entity === "project") return Object.values(value).some((v) => !isBlank(v))
+  return (IDENTITY_FIELDS[entity] ?? ["name"]).every((f) => typeof value[f] === "string" && value[f].trim().length > 0)
 }
 
 /** Điểm AI dưới mức này ⇒ luôn "Cần xem", tín hiệu code khớp đến đâu cũng không kéo qua ngưỡng. */
 export const AI_MIN_TRUSTED = 0.6
 
+/** FLF-444: trung bình tín hiệu code dưới mức này ⇒ luôn "Cần xem", điểm AI cao đến đâu cũng không kéo qua ngưỡng. */
+export const CODE_MIN_TRUSTED = 0.75
+
 /**
- * Độ tin cuối = AI × 0.6 + trung bình tín hiệu code × 0.4, làm tròn 2 chữ số. Điểm AI < 0.6 ⇒ chặn dưới ngưỡng xác nhận
- * (`FIELD_CONFIDENCE_THRESHOLD`) để vẫn gắn cờ Cần xem.
+ * Độ tin cuối = AI × 0.6 + trung bình tín hiệu code × 0.4, làm tròn 2 chữ số. Điểm AI < 0.6 hoặc tín hiệu code < 0.75 ⇒
+ * chặn dưới ngưỡng xác nhận (`FIELD_CONFIDENCE_THRESHOLD`) để vẫn gắn cờ Cần xem. FLF-444 (BF đoạn *Độ tin*): điểm AI không
+ * bao giờ là tín hiệu duy nhất - không có tín hiệu code nào ⇒ phần code tính 0 (trước đây lấy luôn điểm AI).
  */
 export const combineAiConfidence = (ai: number, signals: readonly number[]): number => {
-  const code = signals.length ? signals.reduce((a, b) => a + b, 0) / signals.length : ai
+  const code = signals.length ? signals.reduce((a, b) => a + b, 0) / signals.length : 0
   const combined = Math.round(Math.min(1, Math.max(0, AI_CONFIDENCE_WEIGHT * ai + (1 - AI_CONFIDENCE_WEIGHT) * code)) * 100) / 100
-  return ai < AI_MIN_TRUSTED ? Math.min(combined, Math.round((FIELD_CONFIDENCE_THRESHOLD - 0.01) * 100) / 100) : combined
+  return ai < AI_MIN_TRUSTED || code < CODE_MIN_TRUSTED ? Math.min(combined, belowThreshold()) : combined
 }
+
+const belowThreshold = (): number => Math.round((FIELD_CONFIDENCE_THRESHOLD - 0.01) * 100) / 100
 
 /**
  * Đổi output model sang item: id theo mã / tên phần tử đã biết (`aiItemId`), ép id function của section function.
@@ -471,11 +510,12 @@ export const itemsFromAi = (
   }
 ): EntityItem[] => {
   let functionUsed = false
-  return out.items.map((raw) => {
+  return out.items.flatMap((raw) => {
     const value = { ...raw.value }
     delete value.id
     let id: string | null = null
     let knownKey = false
+    let ambiguous = false
     if (raw.entity !== "project") {
       if (raw.entity === "functions" && ctx.sectionFunction && !functionUsed) {
         id = ctx.sectionFunction.id
@@ -485,23 +525,47 @@ export const itemsFromAi = (
         const found = aiItemId(ctx.known, raw.entity, raw.key, value.name ?? value.term, ctx.fromImage)
         // Khoá trỏ đúng một phần tử đã biết (bảng, mục trước) — mã model tự đặt mới thì không tính
         knownKey = !!found && ctx.known.some((k) => k.entity === raw.entity && k.id === found)
+        // FLF-444: mã trỏ một phần tử đã biết mà tên trỏ phần tử khác ⇒ không phải đúng một đối tượng tương ứng
+        const byKey = raw.key?.trim() ? findKnownKey(ctx.known, raw.entity, raw.key) : null
+        const byName = findKnownId(ctx.known, raw.entity, value.name ?? value.term)
+        ambiguous = !!byKey && !!byName && byKey !== byName
+        // FLF-476 lưới an toàn: item đọc từ đoạn văn (không bảng, không ảnh) chỉ có khoá, không có tên, không khớp phần
+        // tử nào đã biết ⇒ không tạo phần tử mới (EduCampus: đoạn 2.2.1 nhắc "UC-02" không tên nằm cạnh use case "02"
+        // thật của bảng 2.2.2 ⇒ 9 use case rỗng trùng). Mã vẫn còn trong chữ nguyên văn + `mentions` của block (C-3).
+        // `knownKey` (không phải `found`): `found` luôn có giá trị khi model đọc được khoá (`aiItemId` trả lại đúng khoá
+        // đó để giữ dạng tài liệu — FLF-361), dù khoá không khớp phần tử nào đã biết. Chỉ áp khi model CÓ đọc khoá
+        // (`raw.key`) — không khoá, không tên là ca khác (model không đọc được gì), giữ hành vi cũ (cấp id mới).
+        if (raw.key && !knownKey && !ctx.fromImage && NAME_REQUIRED_TO_CREATE.has(raw.entity) && !hasName(value)) return []
         id = found ?? ctx.alloc.next(raw.entity)
         ctx.alloc.reserve(raw.entity, id)
       }
     }
     if (raw.entity === "nfrs" && NFR_CATEGORY_BY_SECTION[ctx.sectionId] && value.category === undefined) value.category = NFR_CATEGORY_BY_SECTION[ctx.sectionId]
     const sources = raw.source_block_ids.filter((b) => ctx.validBlocks.has(b))
-    const signals = codeSignals(raw, { validBlocks: ctx.validBlocks, blockText: ctx.blockText, knownKey, sectionConfidence: ctx.sectionConfidence })
-    return {
-      entity: raw.entity,
-      id,
-      value,
-      confidence: combineAiConfidence(raw.confidence, signals),
-      field_confidence: Object.fromEntries(Object.entries(raw.field_confidence ?? {}).map(([k, v]) => [k, combineAiConfidence(v, signals)])),
-      source_block_ids: sources.length ? sources : [...ctx.validBlocks].slice(0, 1),
-      origin: "ai" as const
-    }
+    const signals = codeSignals(raw, { validBlocks: ctx.validBlocks, blockText: ctx.blockText, knownKey, sectionConfidence: ctx.sectionConfidence, ambiguous })
+    // FLF-444: không tìm được đúng một đối tượng tương ứng ⇒ luôn Cần xem
+    const score = (ai: number) => (ambiguous ? Math.min(combineAiConfidence(ai, signals), belowThreshold()) : combineAiConfidence(ai, signals))
+    return [
+      {
+        entity: raw.entity,
+        id,
+        value,
+        confidence: score(raw.confidence),
+        field_confidence: Object.fromEntries(Object.entries(raw.field_confidence ?? {}).map(([k, v]) => [k, score(v)])),
+        source_block_ids: sources.length ? sources : [...ctx.validBlocks].slice(0, 1),
+        origin: "ai" as const
+      }
+    ]
   })
+}
+
+/** Loại bắt buộc có tên — không có tên thì không phải phần tử (lưới an toàn FLF-476). */
+const NAME_REQUIRED_TO_CREATE: ReadonlySet<string> = new Set(["use_cases", "functions", "business_rules"])
+
+/** Giá trị model trả có tên / thuật ngữ không rỗng (`name`, `term`, hoặc `statement` của business rule). */
+const hasName = (value: Record<string, unknown>): boolean => {
+  const v = value.name ?? value.term ?? value.statement
+  return typeof v === "string" && v.trim() !== ""
 }
 
 // ─── ảnh diagram (mode 1 v3 phase 5) ─────────────────────────────
@@ -734,13 +798,22 @@ const provisionalItems = (sectionId: string, provisional: Map<string, Provisiona
   return [{ entity: p.entity, id: p.id, value, confidence: p.confidence, field_confidence: {}, source_block_ids: [p.block_id], origin: "deterministic" }]
 }
 
-const needsReview = (drafts: Pick<IExtractionDraft, "fields">[]): boolean =>
-  drafts.some((d) => d.fields.some((f) => !f.confirmed && needsConfirm(f)))
+/**
+ * FLF-462 (bước 1.6): còn phần tử I-4 độ tin thấp, đoạn lớp 4 chữ hướng dẫn độ tin thấp, hoặc mục tên đúng nội dung sai
+ * chưa xác nhận ⇒ dừng ở `fields_review`. Độ tin thấp của I-3 (mapping) không tính ở đây (`autoConfirmMapping`, không dừng).
+ */
+export const needsReview = (drafts: Pick<IExtractionDraft, "fields" | "guidance_blocks" | "content_mismatch">[]): boolean =>
+  drafts.some(
+    (d) =>
+      d.fields.some((f) => !f.confirmed && needsConfirm(f)) ||
+      (d.guidance_blocks ?? []).some((g) => !g.confirmed && needsConfirmGuidance(g)) ||
+      !!(d.content_mismatch && !d.content_mismatch.confirmed)
+  )
 
 // ─── kế hoạch lượt AI (chung cho lượt chạy và ước tính credit) ───
 
 /** Một lượt AI của section theo thứ tự chạy: ảnh diagram trước (thực thể ảnh vào known_keys của lô chữ), rồi lô chữ. */
-export type SectionAiStep = { kind: "image"; block: BlockLite } | { kind: "text"; batch: BlockLite[] }
+export type SectionAiStep = { kind: "image"; block: BlockLite } | { kind: "text"; batch: BlockLite[]; guidance_cells?: BlockLite[] }
 
 /** Section chưa xong: phần đọc tất định + các lượt AI theo thứ tự. */
 export interface PlannedSection {
@@ -774,12 +847,19 @@ export const sectionAiSteps = (sectionId: string, blocks: BlockLite[], settled: 
   // Phase 5: ảnh diagram (EMF/WMF / file gốc không còn ⇒ lúc chạy ghi `unsupported`, không gọi AI)
   const images = sectionBlocks.filter((b) => b.kind === "image" && b.image_ref && readsImage(sectionId, captionOf(b, sectionBlocks)))
   const batches = targetsOf(sectionId).length ? chunkBlocks(aiBlocks) : []
-  return [...images.map((block) => ({ kind: "image" as const, block })), ...batches.map((batch) => ({ kind: "text" as const, batch }))]
+  // FLF-462 (lớp 4): ô bảng đúng 1 dấu hiệu không vào lô riêng (AI nhận cả bảng) - đi kèm lô chứa bảng của nó làm ứng viên, không thêm lượt gọi
+  const layer4Cells = sectionBlocks.filter((b) => b.kind === "table_cell" && b.guidance_layer === 4 && b.text.trim())
+  const textSteps = batches.map((batch) => {
+    const prefixes = batch.filter((b) => b.kind === "table").map((b) => `${b.anchor.xml_path}/`)
+    const cells = layer4Cells.filter((c) => prefixes.some((prefix) => c.anchor.xml_path.startsWith(prefix)))
+    return { kind: "text" as const, batch, ...(cells.length ? { guidance_cells: cells } : {}) }
+  })
+  return [...images.map((block) => ({ kind: "image" as const, block })), ...textSteps]
 }
 
 export const stepsHash = (steps: SectionAiStep[]): string =>
   createHash("sha1")
-    .update(JSON.stringify(steps.map((s) => (s.kind === "image" ? ["image", s.block.block_id, s.block.image_ref] : ["text", s.batch.map((b) => [b.block_id, b.text])]))))
+    .update(JSON.stringify(steps.map((s) => (s.kind === "image" ? ["image", s.block.block_id, s.block.image_ref] : ["text", s.batch.map((b) => [b.block_id, b.text]), ...(s.guidance_cells ? [s.guidance_cells.map((c) => c.block_id)] : [])]))))
     .digest("hex")
 
 /** Đọc tất định + lượt AI của mọi section chưa `done`, theo thứ tự tài liệu. */
@@ -810,27 +890,40 @@ interface ExtractionInputs {
 }
 
 /**
- * FLF-378 (luồng C, C2.1): file là **khung mẫu để điền** (giữ khung + màn đọc khung thấy phần lớn mục trống — `isTemplateFile`)
- * — chữ trong file là hướng dẫn / ví dụ, không phải dữ liệu ⇒ không trích nội dung vào Spine (không gọi AI, không đọc bảng tất
- * định). Chỉ giữ cấu trúc từ heading (tính năng / chức năng tạm của mapping) để mục của mẫu khớp được phần tử Spine; chữ của
- * mẫu thành `template_context` lúc finalize. Khung mẫu có tick bổ sung theo mẫu chuẩn cũng vậy (`isTemplateContent`, FLF-411).
+ * File **chỉ còn khung**: màn đọc khung không thấy mục nào có nội dung (mọi mục còn trống hoặc đã Bỏ chữ) ⇒ không có gì để trích
+ * vào Spine (không gọi AI, không đọc bảng tất định, không rà soát 1.11). Chỉ giữ cấu trúc từ heading (tính năng / chức năng tạm
+ * của mapping) để mục của mẫu khớp được phần tử Spine; chữ hướng dẫn thành `template_context` lúc finalize.
+ * FLF-463 (đảo FLF-378 / FLF-411): nhãn "Khung mẫu" (dưới 20% mục có chữ) không còn chặn đọc — mục đã viết luôn là "có" nên vẫn
+ * được đọc như SRS đã viết. Hồ sơ trước màn đọc khung (không có bản sơ bộ) ⇒ theo cách cũ (`isTemplateFile`).
  */
 export const isTemplateOnlyProject = async (projectId: string): Promise<boolean> => {
   const [project, profile] = await Promise.all([
     Project.findById(projectId, { start_kind: 1, template_intent: 1 }).lean(),
     TemplateProfile.findOne({ projectId }, { structure_preview: 1 }).lean()
   ])
-  // FLF-411: khung mẫu mà người dùng tick bổ sung theo mẫu chuẩn (ý định tự do) cũng không trích chữ / hình ví dụ của mẫu
-  return isTemplateFile(project, profile) || isTemplateContent(profile)
+  const preview = profile?.structure_preview
+  return preview ? preview.summary.present === 0 : isTemplateFile(project, profile)
 }
+
+/**
+ * FLF-460 (BF §3.1.2 "số credit tính theo nhãn đã sửa"): mục người dùng gắn nhãn Ngoài phạm vi ở màn đọc khung không được đọc ở
+ * I-4 (không soạn, không kiểm, không tính credit). Chỉ nhãn tay: mục I-4 tự xếp ngoài SRS (FLF-455) vẫn phải đọc để phân loại.
+ * Id mục đọc = id mapping của heading, hoặc `content:@<heading>` khi heading chưa khớp mục nào.
+ */
+export const userOutOfScopeReadSections = (profile: Pick<ITemplateProfile, "heading_map">): Set<string> =>
+  new Set(
+    profile.heading_map
+      .filter((h) => h.scope_label === "out_of_scope")
+      .map((h) => (h.section_id === "unmapped" ? contentSectionId(h.block_id) : h.section_id))
+  )
 
 export const loadExtractionInputs = async (projectId: string): Promise<ExtractionInputs | null> => {
   const profile = await TemplateProfile.findOne({ projectId })
   if (!profile) return null
   const stored = await DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }).sort({ "anchor.ordinal": 1 }).lean<BlockLite[]>()
-  // FLF-412: lựa chọn Bỏ chữ chưa áp vào file (trước Bắt đầu) ⇒ ước tính như file đã bỏ chữ. Ý định chỉ quyết định có bỏ heading
-  // mục riêng hay không — heading không tốn lượt đọc nên không cần biết
-  const blocks = profile.drop_text?.length ? applyDropToBlocks(stored, planDrop(stored, textRegions(stored, profile.heading_map), new Set(profile.drop_text), "fixed")) : stored
+  // FLF-412: lựa chọn Bỏ chữ chưa áp vào file (trước Bắt đầu) ⇒ ước tính như file đã bỏ chữ (FLF-463: chỉ còn heading, hàng tiêu đề
+  // bảng, chữ hướng dẫn — chữ cũ không vào lượt đọc của AI)
+  const blocks = profile.drop_text?.length ? applyDropToBlocks(stored, planDrop(stored, textRegions(stored, profile.heading_map), new Set(profile.drop_text))) : stored
   return { profile, blocks, provisional: resolveProvisional(profile.heading_map), plan: extractionPlan(blocks) }
 }
 
@@ -1016,6 +1109,66 @@ interface SectionState {
   unmapped: string[]
   diagramImages: IExtractionDraft["diagram_images"]
   usageId: string | null
+  /** FLF-444: tên mục và nội dung khác nhau; lớp 4 chữ hướng dẫn và loại nội dung 29148 theo block. */
+  contentMismatch: IExtractionDraft["content_mismatch"]
+  guidanceBlocks: IExtractionDraft["guidance_blocks"]
+  contentTypes: IExtractionDraft["content_types"]
+}
+
+/**
+ * Heading của section trích. FLF-444: mục đọc theo nội dung (`content:@B…`) lấy tiêu đề của chính block heading, không có
+ * độ tin khớp mục (I-3 không khớp được mục nào ⇒ không phải tín hiệu code).
+ */
+export const headingOf = (profile: Pick<ITemplateProfile, "heading_map">, sectionId: string): { heading_text?: string; confidence?: number } | undefined => {
+  const content = CONTENT_SECTION.exec(sectionId)
+  if (!content) return profile.heading_map.find((h) => h.section_id === sectionId)
+  const h = profile.heading_map.find((x) => x.block_id === content[1])
+  return h ? { heading_text: h.heading_text } : undefined
+}
+
+/**
+ * FLF-444 (BF §3.1 I-4, *File lệch format* dòng "Tên khác chuẩn"): khối dưới heading tự đặt mà I-3 không khớp được mục nào
+ * (block không có `section_id`) thành một mục đọc theo nội dung `content:@<heading>`, theo heading gần nhất phía trên. Mục
+ * không có chữ thật (chỉ heading, chữ hướng dẫn, chỗ điền của mẫu) không thành mục đọc - mục trống xét theo heading và mẫu đã
+ * khớp ở I-3, không gọi AI. Heading nhóm (`group:*`) giữ như cũ. Chỉ đổi bản sao trong bộ nhớ, không ghi DocBlock.
+ */
+export const withContentSections = <B extends Pick<BlockLite, "block_id" | "kind" | "text" | "section_id" | "image_ref"> & { level?: number | null }>(
+  blocks: B[],
+  headingMap: readonly Pick<HeadingMapEntry, "block_id" | "section_id">[]
+): B[] => {
+  const mapped = new Map(headingMap.map((h) => [h.block_id, h.section_id]))
+  const marks = templateMarks(blocks as unknown as BlockLite[])
+  const owner = new Map<string, string>()
+  const stack: { level: number; heading: string | null }[] = []
+  for (const b of blocks) {
+    if (b.kind === "heading") {
+      const level = b.level ?? 1
+      while (stack.length && stack[stack.length - 1].level >= level) stack.pop()
+      const section = mapped.get(b.block_id) ?? UNMAPPED_SECTION
+      stack.push({ level, heading: section === UNMAPPED_SECTION && !b.section_id ? b.block_id : null })
+      continue
+    }
+    const heading = stack[stack.length - 1]?.heading
+    if (heading && !b.section_id) owner.set(b.block_id, heading)
+  }
+  const real = new Set<string>()
+  for (const b of blocks) {
+    const heading = owner.get(b.block_id)
+    if (!heading || marks.has(b.block_id)) continue
+    if ((b.kind === "image" && b.image_ref) || (b.kind === "table" && b.text.trim()) || isRealText(b.text)) real.add(heading)
+  }
+  return blocks.map((b) => {
+    const heading = owner.get(b.block_id) ?? (b.kind === "heading" && !b.section_id ? b.block_id : undefined)
+    return heading && real.has(heading) ? { ...b, section_id: contentSectionId(heading) } : b
+  })
+}
+
+/** `loadExtractionInputs` + mục đọc theo nội dung (FLF-444) - dùng chung cho lượt chạy, ước tính credit và đọc lại ảnh. */
+export const loadContentInputs = async (projectId: string): Promise<ExtractionInputs | null> => {
+  const inputs = await loadExtractionInputs(projectId)
+  if (!inputs) return null
+  const blocks = withContentSections(inputs.blocks, inputs.profile.heading_map)
+  return { ...inputs, blocks, plan: extractionPlan(blocks) }
 }
 
 /** Ngữ cảnh tĩnh của một section — chung cho lúc đọc (gọi AI) và lúc ghép (replay). */
@@ -1027,8 +1180,9 @@ const sectionContext = (planned: PlannedSection, inputs: Pick<ExtractionInputs, 
     planned,
     section_id,
     sectionBlocks,
-    heading: inputs.profile.heading_map.find((h) => h.section_id === section_id),
+    heading: headingOf(inputs.profile, section_id),
     targets: targetsOf(section_id),
+    otherTargets: otherTargetsOf(section_id),
     ownProvisional: provisionalScope(section_id, inputs.provisional),
     sectionFunction: sectionFunction?.entity === "functions" ? sectionFunction : null,
     mentionedRules: new Set(sectionBlocks.flatMap((b) => (b.mentions ?? []).filter((m) => m.entity === "business_rule").map((m) => idKey(m.id)))),
@@ -1047,7 +1201,10 @@ const initialState = (sc: SectionContext, progress: ExtractionProgress | null): 
   // Bảng đặc tả use case đã đọc tất định nhưng Spine không chứa hết (luồng, tiền / hậu điều kiện) ⇒ giữ nguyên văn
   unmapped: progress?.unmapped_block_ids ? [...progress.unmapped_block_ids] : [...sc.planned.settled.verbatim],
   diagramImages: progress?.diagram_images ? [...progress.diagram_images] : [],
-  usageId: progress?.usage_id ?? null
+  usageId: progress?.usage_id ?? null,
+  contentMismatch: null,
+  guidanceBlocks: [],
+  contentTypes: []
 })
 
 /**
@@ -1072,22 +1229,59 @@ const applyRawStep = (state: SectionState, step: SectionAiStep, raw: RawAiStep, 
   // Văn xuôi không trích được ⇒ finalize giữ nguyên văn làm phần nối của section (mode 1 v2 — FLF-184)
   const inBatch = new Set(batch.map((b) => b.block_id))
   state.unmapped.push(...raw.data.unmapped_block_ids.filter((id) => inBatch.has(id) && !state.unmapped.includes(id)))
-  state.items.push(
-    ...keepMentionedRules(
-      itemsFromAi(raw.data, {
-        sectionId: sc.section_id,
-        alloc: ids,
-        known: [...known, ...state.items],
-        sectionFunction: sc.sectionFunction,
-        validBlocks: inBatch,
-        blockText: new Map(batch.map((b) => [b.block_id, b.text])),
-        sectionConfidence: sc.heading?.confidence ?? null
-      }),
-      sc.mentionedRules
-    )
+  const read = keepMentionedRules(
+    itemsFromAi(raw.data, {
+      sectionId: sc.section_id,
+      alloc: ids,
+      known: [...known, ...state.items],
+      sectionFunction: sc.sectionFunction,
+      validBlocks: inBatch,
+      blockText: new Map(batch.map((b) => [b.block_id, b.text])),
+      sectionConfidence: sc.heading?.confidence ?? null
+    }),
+    sc.mentionedRules
   )
+  // FLF-444: tên đúng, nội dung sai ⇒ tin nội dung, hạ độ tin phần tử AI của lượt để người xác nhận ở bước 1.6
+  const mismatch = contentMismatchOf(sc.section_id, sc.targets, read, raw.data.content_mismatch?.content ?? null)
+  if (mismatch) state.contentMismatch = mergeMismatch(state.contentMismatch, mismatch)
+  state.items.push(...(mismatch ? read.map(needsConfirmation) : read))
+  // FLF-462: chỉ nhận lớp 4 thật của batch (block Code đã gắn `guidance_layer === 4`) - AI không tự đưa block khác vào đây
+  const layer4 = new Set([...batch, ...(step.kind === "text" ? step.guidance_cells ?? [] : [])].filter((b) => b.guidance_layer === 4).map((b) => b.block_id))
+  state.guidanceBlocks.push(...(raw.data.guidance_blocks ?? []).filter((g) => layer4.has(g.block_id)).map((g) => ({ ...g, confirmed: false })))
+  state.contentTypes.push(...(raw.data.content_types ?? []).filter((c) => inBatch.has(c.block_id)))
   state.unmapped.push(...tablesToKeepVerbatim(batch, state.items).filter((id) => !state.unmapped.includes(id)))
 }
+
+/**
+ * FLF-444 (BF *File lệch format* dòng "Tên đúng, nội dung sai"): mục đã khớp theo tên mà nội dung là loại khác - AI báo
+ * (`content_mismatch`) hoặc mọi phần tử AI đọc ra đều thuộc loại ngoài mục. Mục đọc theo nội dung không có tên để lệch.
+ */
+export const contentMismatchOf = (
+  sectionId: string,
+  targets: readonly string[],
+  items: readonly Pick<EntityItem, "entity">[],
+  note: string | null
+): NonNullable<IExtractionDraft["content_mismatch"]> | null => {
+  if (CONTENT_SECTION.test(sectionId) || !targets.length) return null
+  const byContent = [...new Set(items.map((it) => it.entity))]
+  const offTarget = byContent.length > 0 && !byContent.some((e) => targets.includes(e))
+  if (!note && !offTarget) return null
+  // FLF-462: mới phát hiện ⇒ chưa xác nhận ở bước 1.6
+  return { by_heading: [...targets], by_content: byContent.filter((e) => !targets.includes(e)), note, confirmed: false }
+}
+
+const mergeMismatch = (
+  prev: IExtractionDraft["content_mismatch"],
+  next: NonNullable<IExtractionDraft["content_mismatch"]>
+): NonNullable<IExtractionDraft["content_mismatch"]> =>
+  prev ? { by_heading: next.by_heading, by_content: [...new Set([...prev.by_content, ...next.by_content])], note: prev.note ?? next.note, confirmed: false } : next
+
+/** Phần tử phải qua người xác nhận: độ tin item và từng field dưới ngưỡng. */
+const needsConfirmation = (it: EntityItem): EntityItem => ({
+  ...it,
+  confidence: Math.min(it.confidence, belowThreshold()),
+  field_confidence: Object.fromEntries(Object.entries(it.field_confidence).map(([k, v]) => [k, Math.min(v, belowThreshold())]))
+})
 
 /** Số lần tự chạy tiếp trong một job khi ví được nạp trong lúc dừng vì hết credit (chặn vòng lặp). */
 const TOPUP_RECHECKS = 3
@@ -1133,15 +1327,29 @@ export const runExtraction = async (projectId: string, userId: string, importId:
   }
 }
 
+/**
+ * Đặt / bỏ dấu "đang đọc" của một section. Chỉ `$set` field riêng (không `save()`) để không đè `partial` đang lưu song song;
+ * lỗi ghi chỉ ảnh hưởng hiệu ứng hiển thị nên không làm hỏng lượt đọc.
+ */
+const markReading = async (draftId: mongoose.Types.ObjectId, since: Date | null): Promise<void> => {
+  try {
+    await ExtractionDraft.updateOne({ _id: draftId }, { $set: { reading_since: since } })
+  } catch (err) {
+    console.warn("[I-4] không ghi được dấu đang đọc của mục:", err)
+  }
+}
+
 const extractSections = async (projectId: string, userId: string, importId: string, stats: { calls: number; notifiedTopUp: boolean }): Promise<ExtractionRun> => {
   const doc = await requireImport(projectId, importId)
   assertImportStatus(doc, ["extracting"], "extracting")
-  const inputs = await loadExtractionInputs(projectId)
+  const inputs = await loadContentInputs(projectId)
   if (!inputs) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa đọc xong bố cục tài liệu", { status: doc.status, to: "extracting", allowed: [] })
   const { profile, blocks, provisional, plan } = inputs
 
   doc.paused = null
   await doc.save()
+  // Lần chạy trước chết giữa chừng (server khởi động lại) để lại dấu "đang đọc" — xoá trước khi mở pool
+  await ExtractionDraft.updateMany({ import_id: doc._id, reading_since: { $ne: null } }, { $set: { reading_since: null } })
   for (const section_id of plan) {
     await ExtractionDraft.updateOne(
       { import_id: doc._id, section_id },
@@ -1151,6 +1359,23 @@ const extractSections = async (projectId: string, userId: string, importId: stri
   }
   const drafts = await ExtractionDraft.find({ import_id: doc._id })
   const draftOf = new Map(drafts.map((d) => [d.section_id, d]))
+  // Mục gắn nhãn Ngoài phạm vi: coi như đã đọc xong (không gọi AI, không trừ credit), chỉ giữ cấu trúc từ heading
+  const userOut = userOutOfScopeReadSections(profile)
+  for (const section_id of plan) {
+    const draft = draftOf.get(section_id)!
+    if (!userOut.has(section_id) || draft.status === "done") continue
+    draft.fields = mergeItems(provisionalItems(section_id, provisional)).flatMap(flattenItem) as ExtractedField[]
+    draft.status = "done"
+    draft.error = null
+    draft.unmapped_block_ids = []
+    draft.diagram_images = []
+    draft.content_mismatch = null
+    draft.guidance_blocks = []
+    draft.content_types = []
+    draft.partial = null
+    draft.markModified("fields")
+    await draft.save()
+  }
 
   if (await isTemplateOnlyProject(projectId)) {
     for (const section_id of plan) {
@@ -1160,6 +1385,9 @@ const extractSections = async (projectId: string, userId: string, importId: stri
       draft.error = null
       draft.unmapped_block_ids = []
       draft.diagram_images = []
+      draft.content_mismatch = null
+      draft.guidance_blocks = []
+      draft.content_types = []
       draft.partial = null
       draft.markModified("fields")
       await draft.save()
@@ -1285,7 +1513,9 @@ const extractSections = async (projectId: string, userId: string, importId: stri
         section_id,
         heading_text: heading?.heading_text ?? section_id,
         target_entities: targets.join(", "),
-        schema_excerpt: schemaExcerptFor(targets),
+        // FLF-444: một section nhiều loại nội dung - loại ngoài mục vẫn trả được khi chữ rõ ràng là loại đó
+        other_entities: sc.otherTargets.length ? sc.otherTargets.join(", ") : "none",
+        schema_excerpt: schemaExcerptFor([...targets, ...sc.otherTargets]),
         // Chỉ phần tử lô này có thể nhắc tới (không còn cả tài liệu) — ghép mã / tên lúc ghép section vẫn dùng toàn bộ `known`
         known_keys: knownKeysText(
           scopeKnownKeys([...view, ...state.items], {
@@ -1296,6 +1526,8 @@ const extractSections = async (projectId: string, userId: string, importId: stri
             always: ALWAYS_KNOWN
           })
         ),
+        // FLF-462: lớp 4 chữ hướng dẫn (Code chỉ thấy đúng một dấu hiệu) - AI phân loại trong cùng lượt đọc, không gọi thêm
+        guidance_candidates: [...step.batch.filter((b) => b.guidance_layer === 4).map((b) => b.block_id), ...(step.guidance_cells ?? []).map((c) => `${c.block_id} (table cell: "${c.text.trim().slice(0, 200)}")`)].join(", ") || "none",
         blocks: text
       },
       { notifyTopUp: false }
@@ -1309,6 +1541,19 @@ const extractSections = async (projectId: string, userId: string, importId: stri
    */
   const readSection = async (planned: PlannedSection): Promise<PoolRead<ExtractionProgress | null>> => {
     const draft = draftOf.get(planned.section_id)!
+    const readStarted = Date.now()
+    const callsBefore = stats.calls
+    await markReading(draft._id as mongoose.Types.ObjectId, new Date())
+    try {
+      return await readSectionSteps(planned, draft)
+    } finally {
+      // Mọi đường thoát (đọc xong, dừng, hết credit, AI lỗi, ném lỗi) đều bỏ dấu "đang đọc"
+      await markReading(draft._id as mongoose.Types.ObjectId, null)
+      console.info(`[I-4] import ${importId} mục ${planned.section_id}: đọc xong sau ${Date.now() - readStarted} ms, ${stats.calls - callsBefore} lượt AI`)
+    }
+  }
+
+  const readSectionSteps = async (planned: PlannedSection, draft: ExtractionDraftDoc): Promise<PoolRead<ExtractionProgress | null>> => {
     const sc = sectionContext(planned, inputs)
     let progress: ExtractionProgress | null = stepsDoneOf(draft, planned) > 0 ? (draft.partial as ExtractionProgress) : null
     const raw: RawAiStep[] = [...(progress?.raw_steps ?? [])]
@@ -1377,9 +1622,13 @@ const extractSections = async (projectId: string, userId: string, importId: stri
     draft.usage_id = state.usageId
     draft.unmapped_block_ids = state.unmapped
     draft.diagram_images = state.diagramImages
+    draft.content_mismatch = state.contentMismatch
+    draft.guidance_blocks = state.guidanceBlocks
+    draft.content_types = state.contentTypes
     draft.partial = null
     draft.markModified("fields")
     draft.markModified("partial")
+    draft.markModified("content_mismatch")
     await draft.save()
     // Con trỏ = section đầu hàng chưa ghép (chạy tiếp / `markOrphanedExtraction` thấy đúng chỗ)
     if (pending[index + 1]) await writeDoc(() => (doc.extract_cursor = pending[index + 1].section_id))
@@ -1408,8 +1657,10 @@ const extractSections = async (projectId: string, userId: string, importId: stri
 
   doc.extract_cursor = null
   await doc.save()
-  // FLF-343: không dừng ở `fields_review` — field độ tin thấp vào baseline 0.1 kèm cờ "Cần xem" (finalize)
-  await transitionImport(doc, "baselining")
+  // FLF-462 (đảo FLF-343 ở phần I-4): còn phần tử / đoạn lớp 4 độ tin thấp, hoặc mục tên đúng nội dung sai chưa xác nhận ⇒
+  // dừng ở bước 1.6 (`fields_review`, UC-22 `patchFields`); không có gì cần xác nhận ⇒ đi thẳng I-5 như FLF-343.
+  const finalDrafts = await ExtractionDraft.find({ import_id: doc._id })
+  await transitionImport(doc, needsReview(finalDrafts) ? "fields_review" : "baselining")
   return summary()
 }
 
@@ -1442,7 +1693,7 @@ export const rereadContextOf = (
   return {
     ...base,
     section_id,
-    heading: inputs.profile.heading_map.find((h) => h.section_id === section_id),
+    heading: headingOf(inputs.profile, section_id),
     sectionBlocks: inputs.blocks.filter((b) => b.section_id === section_id),
     known,
     items: itemsOfDraft(draft),
@@ -1532,7 +1783,7 @@ export interface ExtractionEstimate {
  * không gọi AI. Chưa có template profile ⇒ `null`.
  */
 export const estimateExtraction = async (projectId: string, doc: Pick<IImportedDocument, "_id">): Promise<ExtractionEstimate | null> => {
-  const inputs = await loadExtractionInputs(projectId)
+  const inputs = await loadContentInputs(projectId)
   if (!inputs) return null
   // FLF-378: dự án mới theo mẫu bắt buộc không trích (không gọi AI)
   if (await isTemplateOnlyProject(projectId)) return { text_batches: 0, diagram_images: 0, ai_calls: 0, credits: 0 }
@@ -1540,7 +1791,7 @@ export const estimateExtraction = async (projectId: string, doc: Pick<IImportedD
     Pick<IExtractionDraft, "section_id" | "status" | "partial" | "diagram_images">[]
   >()
   const draftOf = new Map(drafts.map((d) => [d.section_id, d]))
-  const done = new Set(drafts.filter((d) => d.status === "done").map((d) => d.section_id))
+  const done = new Set([...drafts.filter((d) => d.status === "done").map((d) => d.section_id), ...userOutOfScopeReadSections(inputs.profile)])
   let text = 0
   let images = 0
   for (const planned of planPendingSections(inputs.plan, inputs.blocks, inputs.profile, inputs.provisional, done)) {
@@ -1565,16 +1816,32 @@ export const estimateExtraction = async (projectId: string, doc: Pick<IImportedD
 export const creditEstimateFor = async (
   projectId: string,
   userId: string,
-  doc: Pick<IImportedDocument, "_id" | "status">,
+  doc: IImportedDocument,
   opts: { withBalance: boolean }
-): Promise<(ExtractionEstimate & { check_calls: number; available_credits: number | null }) | null> => {
-  if (doc.status !== "mapping_review" && doc.status !== "extracting") return null
+): Promise<(ExtractionEstimate & { check_calls: number; translate_batches: number; reference_documents: number; reference_credits: number; available_credits: number | null }) | null> => {
+  // FLF-454: finalize dừng ở `checking` (paused: credit_notice) để báo lại credit 1.9 lớn hơn số đã báo ⇒ trả số mới (chỉ phần kiểm)
+  const recheck = doc.status === "checking" && doc.paused?.reason === "credit_notice"
+  if (doc.status !== "mapping_review" && doc.status !== "extracting" && !recheck) return null
   const extraction = await estimateExtraction(projectId, doc)
   if (!extraction) return null
   // Import động: check.service dùng `chunkBlocks` của file này
   const { estimateCheckCalls } = await import("./check.service.js")
   const check = await estimateCheckCalls(projectId)
-  const estimate = { ...extraction, check_calls: check.calls, ai_calls: extraction.ai_calls + check.calls, credits: extraction.credits + check.credits }
+  // FLF-456: file chỉ còn khung + chọn ngôn ngữ khác file ⇒ cộng phần dịch khung (cùng lượt Bắt đầu)
+  const translate = recheck ? null : await skeletonTranslationEstimate(doc)
+  const translateBatches = translate?.batches ?? 0
+  // FLF-458 (BF §2): tài liệu tham khảo đang chờ đọc cộng vào màn đọc khung, đọc cùng lượt Bắt đầu
+  const { pendingSummaryCredits } = await import("../project/project-document.service.js")
+  const reference = recheck ? { documents: 0, credits: 0 } : await pendingSummaryCredits(projectId)
+  const estimate = {
+    ...extraction,
+    check_calls: check.calls,
+    translate_batches: translateBatches,
+    reference_documents: reference.documents,
+    reference_credits: reference.credits,
+    ai_calls: extraction.ai_calls + check.calls + translateBatches + reference.documents,
+    credits: extraction.credits + check.credits + (translate?.credits ?? 0) + reference.credits
+  }
   if (!opts.withBalance) return { ...estimate, available_credits: null }
   const orgId = await resolveWalletOrg(projectId)
   if (!orgId) return { ...estimate, available_credits: null }
@@ -1582,7 +1849,32 @@ export const creditEstimateFor = async (
   return { ...estimate, available_credits: wallet.balance - wallet.reserved }
 }
 
-// ─── 1.9 xác nhận field (chỉ bản ghi cũ đang `fields_review`, trước FLF-343) ─────────
+// ─── 1.6 / 1.9 xác nhận chữ hướng dẫn và chỗ độ tin thấp (UC-22, FLF-462 bật lại) ─────────
+
+/**
+ * UC-22, nút 1.6/1.9: xác nhận phần tử I-4 độ tin thấp (`fields`), đoạn lớp 4 chữ hướng dẫn AI phân loại (`guidance`), và
+ * mục tên đúng nội dung sai do FLF-444 đánh dấu (`content_mismatch`, chỉ cần xem qua - không đổi phân loại). Đoạn được
+ * xác nhận là hướng dẫn (`is_guidance: true`) chuyển sang lớp chắc chắn ngay trên block đã lưu, để I-5 không còn tính là
+ * nội dung thật (có thể biến mục "có" thành "thiếu"). Hết việc cần xác nhận ⇒ sang `baselining` như FLF-343.
+ */
+/** Id khối `table` chứa ô vừa xác nhận là hướng dẫn và không còn ô nào là nội dung thật (mọi ô không rỗng đều là chữ hướng dẫn). */
+const tablesWithoutContent = async (projectId: string, confirmed: readonly string[]): Promise<string[]> => {
+  const scope = { projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }
+  const cells = await DocBlock.find({ ...scope, kind: "table_cell", block_id: { $in: confirmed } }).select("section_id").lean()
+  const sections = [...new Set(cells.map((c) => c.section_id))]
+  if (!sections.length) return []
+  const inSection = await DocBlock.find({ ...scope, kind: { $in: ["table", "table_cell"] }, section_id: { $in: sections } }).select("block_id kind text anchor guidance_layer").lean()
+  const done = new Set(confirmed)
+  const allCells = inSection.filter((b) => b.kind === "table_cell")
+  return inSection
+    .filter((t) => t.kind === "table" && allCells.some((c) => done.has(c.block_id) && c.anchor.xml_path.startsWith(`${t.anchor.xml_path}/`)))
+    .filter((t) =>
+      allCells
+        .filter((c) => c.anchor.xml_path.startsWith(`${t.anchor.xml_path}/`) && c.text.trim())
+        .every((c) => done.has(c.block_id) || (c.guidance_layer !== undefined && c.guidance_layer <= 3))
+    )
+    .map((t) => t.block_id)
+}
 
 export const patchFields = async (projectId: string, body: FieldsPatchRequest): Promise<IImportedDocument> => {
   const doc = await requireImport(projectId, body.import_id)
@@ -1601,13 +1893,60 @@ export const patchFields = async (projectId: string, body: FieldsPatchRequest): 
     }
     draft.markModified("fields")
   }
+  // FLF-462: đoạn được xác nhận là hướng dẫn ⇒ lớp chắc chắn (I-5 so sau bước này không còn tính là nội dung thật)
+  const confirmedGuidance: string[] = []
+  for (const g of body.guidance) {
+    const draft = drafts.find((d) => d.section_id === g.section_id)
+    const entry = draft?.guidance_blocks.find((x) => x.block_id === g.block_id)
+    if (!draft || !entry) {
+      throw new Mode1Error("IMPORT_INVALID_STATE", `Không có đoạn lớp 4 "${g.block_id}" ở mục đã chọn`, { status: doc.status, to: "baselining", allowed: [] })
+    }
+    entry.is_guidance = g.is_guidance
+    entry.confirmed = true
+    if (g.is_guidance) confirmedGuidance.push(g.block_id)
+    draft.markModified("guidance_blocks")
+  }
+  for (const m of body.content_mismatch) {
+    const draft = drafts.find((d) => d.section_id === m.section_id)
+    if (!draft?.content_mismatch) {
+      throw new Mode1Error("IMPORT_INVALID_STATE", "Mục đã chọn không có cảnh báo tên và nội dung khác nhau", { status: doc.status, to: "baselining", allowed: [] })
+    }
+    draft.content_mismatch.confirmed = true
+    draft.markModified("content_mismatch")
+  }
   if (body.confirm_all) {
     for (const d of drafts) {
       for (const f of d.fields) f.confirmed = true
+      for (const g of d.guidance_blocks) {
+        // Một quy tắc cho cả hai đường: chỉ đoạn đã đưa ra cho người xem (độ tin thấp) mới lên lớp 3 khi "Xác nhận tất cả";
+        // đoạn AI chấm độ tin cao (không dừng, người chưa thấy) giữ lớp 4 (BF §3.1.1: điểm AI không là tín hiệu duy nhất)
+        const shown = !g.confirmed && needsConfirmGuidance(g)
+        g.confirmed = true
+        if (shown && g.is_guidance && !confirmedGuidance.includes(g.block_id)) confirmedGuidance.push(g.block_id)
+      }
+      if (d.content_mismatch) d.content_mismatch.confirmed = true
       d.markModified("fields")
+      d.markModified("guidance_blocks")
+      d.markModified("content_mismatch")
+    }
+  }
+  // FLF-462: field chỉ có nguồn từ đoạn đã xác nhận là hướng dẫn thì bỏ (AI vẫn trích nội dung ở lớp 4, prompt luật 10) ⇒ mục không
+  // còn dữ liệu thật, I-5 tính "thiếu"; field còn nguồn từ khối khác thì giữ
+  if (confirmedGuidance.length) {
+    const guidanceIds = new Set(confirmedGuidance)
+    // Lô AI gửi cả bảng (nguồn field là id khối `table`, không phải id ô): bảng mà mọi ô có chữ đều là chữ hướng dẫn (lớp 1–3 hoặc
+    // vừa xác nhận) thì không còn nội dung thật ⇒ id bảng tính như đã xác nhận; còn ô nội dung thật ⇒ giữ field (không chắc thì là nội dung)
+    for (const id of await tablesWithoutContent(projectId, confirmedGuidance)) guidanceIds.add(id)
+    for (const d of drafts) {
+      const kept = d.fields.filter((f) => !(f.source_block_ids.length > 0 && f.source_block_ids.every((id) => guidanceIds.has(id))))
+      if (kept.length !== d.fields.length) {
+        d.fields = kept as typeof d.fields
+        d.markModified("fields")
+      }
     }
   }
   await Promise.all(drafts.map((d) => d.save()))
+  if (confirmedGuidance.length) await DocBlock.updateMany({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS }, block_id: { $in: confirmedGuidance } }, { $set: { guidance_layer: 3 } })
   if (!needsReview(drafts)) await transitionImport(doc, "baselining")
   return doc
 }

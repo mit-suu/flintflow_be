@@ -18,8 +18,10 @@ import { entitiesOfFeature } from "./entity-features.js"
 import { screenActorMap, screenActorSets, sharedScreenIds } from "./screen-actors.js"
 import { systemName } from "./system-name.js"
 import { DEFAULT_ERD_NOTATION, type RenderContext } from "../../shared/diagram/erd-notation.js"
+import { screenPlatforms } from "./screen-platforms.js"
 import { resolveScreenTheme } from "../../shared/diagram/screen-theme.js"
 import { DEFAULT_SEQUENCE_LEVEL, type SequenceLevel } from "../../shared/diagram/sequence-level.js"
+import { excludedDiagramKind } from "../../shared/diagram/diagram-inclusion.js"
 
 /** Giá trị `source_hash` nghĩa là chưa từng tính (fixture T02 dùng "TBD") — bỏ qua `diagram_stale`. */
 export const UNHASHED_SOURCE_HASHES: ReadonlySet<string> = new Set(["", "TBD"])
@@ -207,7 +209,7 @@ const renderedExtras = (spine: Spine, diagram: Pick<Diagram, "kind" | "owner_id"
   // đọc (mô tả màn, trigger, validation, pop-up/tab, màn đích — `screen-layout.ai.ts#layoutContext`) cũng vào hash ⇒ đổi
   // quy tắc thì hình `diagram_stale`, vẽ lại thì `contentHash` của spec đã lưu lệch ⇒ gọi model lại
   if (diagram.kind === "screen_layout")
-    return { theme: resolveScreenTheme(context.screenTheme, spine.project.form_factor), system_name: systemName(spine.project), content: screenLayoutContent(spine, diagram.owner_id) }
+    return screenLayoutExtras(spine, diagram.owner_id, context)
   const features = byId(spine.features).map(({ id, name, order }) => ({ id, name, order }))
   if (diagram.kind === "screen_flow")
     return {
@@ -226,6 +228,17 @@ const renderedExtras = (spine: Spine, diagram: Pick<Diagram, "kind" | "owner_id"
     functions: byId(spine.functions.filter((f) => referenced.has(f.id))).map(({ id, feature_id }) => ({ id, feature_id })),
     features
   }
+}
+
+/**
+ * Phần hash riêng của `screen_layout`. FLF-493: khoá `platforms` chỉ có khi nền tảng của màn (theo actor dùng màn) KHÁC theme
+ * dự án — màn không thu hẹp giữ nội dung hash y như trước, hình dự án cũ không bị đánh cũ hàng loạt.
+ */
+const screenLayoutExtras = (spine: Spine, screenId: string | null, context: RenderContext): unknown => {
+  const theme = resolveScreenTheme(context.screenTheme, spine.project.form_factor)
+  const platforms = screenPlatforms(spine, screenId ?? "", theme.platforms)
+  const narrowed = platforms.length !== theme.platforms.length || platforms.some((p, i) => p !== theme.platforms[i])
+  return { theme, system_name: systemName(spine.project), content: screenLayoutContent(spine, screenId), ...(narrowed ? { platforms } : {}) }
 }
 
 /** Chữ của màn mà model đọc khi vẽ mockup, ngoài `sourceProjection` (tên màn, tên + mô tả function đã có ở đó). */
@@ -264,12 +277,17 @@ const sequenceExtras = (spine: Spine, diagram: Pick<Diagram, "owner_id">, level:
 }
 
 /** Hash ghi vào `diagrams[].source_hash` và so ở cờ `diagram_stale` — xem đầu file. */
+/** Hash của loại sơ đồ dự án không vẽ — không bao giờ trùng hash thật. */
+export const EXCLUDED_DIAGRAM_HASH = "excluded"
+
 export const renderedDiagramHash = (
   spine: Spine,
   diagram: Pick<Diagram, "kind" | "owner_id">,
   engines: Readonly<Record<DiagramKind, string>> = DIAGRAM_ENGINES,
   context: RenderContext = {}
 ): string => {
+  // FLF-441: loại dự án đã tắt (Class / Sequence / State Machine ngoài mẫu IEEE) ⇒ hình còn lại là cũ ⇒ lượt vẽ lại gỡ nó
+  if (excludedDiagramKind(context, diagram.kind)) return EXCLUDED_DIAGRAM_HASH
   const engine = engines[diagram.kind] ?? DEFAULT_DIAGRAM_ENGINE
   if (engine === DEFAULT_DIAGRAM_ENGINE) return computeSourceHash(spine, diagram)
   return createHash("sha256").update(stableStringify({ engine, projection: sourceProjection(spine, diagram), extras: renderedExtras(spine, diagram, context) })).digest("hex")

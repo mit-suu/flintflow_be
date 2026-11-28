@@ -1,7 +1,7 @@
 ---
 skill_id: entities-erd
 kind: content
-version: 0.13.0
+version: 0.13.1
 description: "S-4.5 domain entities, attributes, feature use, relations and lifecycles, feeding the ERD, per-feature class diagram and per-entity state machine renderers"
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -164,7 +164,7 @@ User; a different role acting on it (reviewer, invigilator) needs its own direct
 ## Pass 5 - Descriptions agree with relations
 
 - Every entity a description names is **linked** to it (definition above): add the relation (Pass 3), or reword
-  the description. A named thing that is not an entity yet ("per semester") is added (Pass 1) or dropped.
+  the description. A named thing that is not an entity yet ("per semester") is added (Pass 1) or dropped. Safest: write "records one action by a signed-in person", not "records actions on a Patient", unless that link exists.
 
 ## Pass 6 - Normal form (3NF at entity level)
 

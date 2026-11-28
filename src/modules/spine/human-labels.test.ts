@@ -7,11 +7,13 @@ import {
   diagramLabel,
   elementLabel,
   humanizeText,
+  internalElementNames,
   nameElementIds,
   pathLabel,
   quotedSectionLabel,
   ruleLabel,
   sectionLabel,
+  stripInternalCodes,
   UNKNOWN_PATH_LABEL
 } from "./human-labels.js"
 
@@ -104,6 +106,23 @@ describe("nameElementIds", () => {
   })
 })
 
+describe("nameElementIds - không ra 'X (X)' (FLF-474)", () => {
+  const spine = {
+    screens: [{ id: "S01", name: "S01" }, { id: "S02", name: "Reset Password" }, { id: "S03", name: "" }]
+  } as unknown as Parameters<typeof nameElementIds>[1]
+
+  it("tên rỗng / bằng mã ⇒ không thay, không ghép; câu 'BR-07 (BR-07)' gộp về 'BR-07'", () => {
+    expect(nameElementIds("Màn S01 và S03 giữ nguyên", spine)).toBe("Màn S01 và S03 giữ nguyên")
+    expect(nameElementIds("Quy tắc BR-07 (BR-07) mâu thuẫn", spine)).toBe("Quy tắc BR-07 mâu thuẫn")
+  })
+
+  it("tên chứa mã hoặc câu đã ghi 'mã (tên)' ⇒ chỉ còn một tên", () => {
+    const extra = new Map([["BR07", "BR07 giới hạn đăng nhập"], ["BR08", "Khoá tài khoản"]])
+    expect(nameElementIds("Xem BR07 và BR08", spine, extra)).toBe("Xem BR07 và 'Khoá tài khoản'")
+    expect(nameElementIds("Màn S02 (Reset Password) cần sửa", spine)).toBe("Màn 'Reset Password' cần sửa")
+  })
+})
+
 describe("elementLabel (FLF-411 U2-5)", () => {
   it("tên phần tử thay mã nội bộ; không tên ⇒ trích câu chính; mã use case giữ", () => {
     expect(elementLabel("actors", "A02", { id: "A02", name: "Customer" })).toBe('tác nhân "Customer"')
@@ -121,5 +140,65 @@ describe("P06 - nameElementIds với mã màn kiểu SCR-05 (câu hỏi C-2 củ
   it("SCR-05 ⇒ tên màn; mã UC giữ nguyên", () => {
     const spine = { screens: [{ id: "SCR-05", name: "Product Detail" }], actors: [], roles: [], features: [], functions: [{ id: "FN009", name: "Add to Cart" }], entities: [] } as unknown as Parameters<typeof nameElementIds>[1]
     expect(nameElementIds("Màn SCR-05 có nút FN009 không? (UC-03)", spine)).toBe("Màn 'Product Detail' có nút 'Add to Cart' không? (UC-03)")
+  })
+})
+
+describe("FLF-474 - nameElementIds với mục riêng / quy tắc / thông báo", () => {
+  const spine = {
+    screens: [],
+    actors: [],
+    roles: [],
+    features: [],
+    functions: [],
+    entities: [],
+    custom_sections: [
+      { id: "CS05", heading: "Chính sách bảo mật" },
+      { id: "CS27", heading: "" }
+    ],
+    business_rules: [
+      { id: "BR07", statement: "Tài khoản bị khoá sau 5 lần đăng nhập sai liên tiếp trong vòng 15 phút" },
+      { id: "BR-75", statement: "Mã tài liệu" }
+    ],
+    messages: [],
+    nfrs: []
+  } as unknown as Parameters<typeof internalElementNames>[0] & Parameters<typeof nameElementIds>[1]
+
+  it("CS27 (phần nối tiêu đề rỗng) ⇒ 'Phần nối của …'; CS05 ⇒ tiêu đề; BR07 ⇒ câu trích; BR-75 (mã tài liệu) giữ", () => {
+    const names = internalElementNames(spine, (id) => (id === "custom:CS27" ? 'Phần nối của "Chính sách bảo mật"' : ""))
+    const text = nameElementIds("CS27 và CS05 mâu thuẫn BR07, còn BR-75 thì khác.", spine, names)
+    expect(text).toBe(
+      "'Phần nối của \"Chính sách bảo mật\"' và 'Chính sách bảo mật' mâu thuẫn 'Tài khoản bị khoá sau 5 lần đăng nhập sai liên tiếp trong vò…', còn BR-75 thì khác."
+    )
+  })
+})
+
+describe("FLF-480: mã nội bộ trong lời cho người đọc", () => {
+  const spine = {
+    screens: [],
+    actors: [],
+    roles: [],
+    features: [],
+    functions: [],
+    entities: [],
+    custom_sections: [],
+    business_rules: [],
+    messages: [{ id: "M57", text: "Thông báo hủy lịch hẹn thành công" }],
+    nfrs: [],
+    other_requirements: [{ id: "OR10", statement: "Who reviews patient accounts?", statement_vi: "Ai duyệt tài khoản bệnh nhân?" }],
+    common_requirements: [],
+    addendum: [],
+    assumptions: []
+  } as unknown as Parameters<typeof internalElementNames>[0] & Parameters<typeof nameElementIds>[1]
+
+  it("OR10 và M57 còn trong spine ⇒ đổi sang câu trích, không còn mã", () => {
+    const text = nameElementIds("Đã đóng OR10 và sửa M57.", spine, internalElementNames(spine))
+    expect(text).not.toMatch(/OR10|M57/)
+    expect(text).toContain("Ai duyệt tài khoản bệnh nhân?")
+  })
+
+  it("stripInternalCodes: dãy mã trong ngoặc bỏ cả ngoặc, mã trần bỏ, mã tài liệu có gạch nối giữ", () => {
+    expect(stripInternalCodes("Đã đóng 11 điểm còn mở (OR01, OR05 đến OR14) rồi.")).toBe("Đã đóng 11 điểm còn mở rồi.")
+    expect(stripInternalCodes("Các điểm còn mở gồm OR02, OR03, OR04.")).toBe("Các điểm còn mở gồm.")
+    expect(stripInternalCodes("UC-01 và BR-75 giữ nguyên")).toBe("UC-01 và BR-75 giữ nguyên")
   })
 })

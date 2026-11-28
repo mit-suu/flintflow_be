@@ -10,6 +10,10 @@ import { ApiError } from "../../shared/utils/api-error.js"
 
 export const MODE1_ERROR_STATUS = {
   CR_SOURCE_REQUIRED: 400,
+  /** FLF-445: `flag_ids` của CR có cờ đã đóng, đã "giữ nguyên" hoặc đã bỏ qua — `meta.flag_ids`. */
+  FLAG_NOT_OPEN: 400,
+  /** FLF-445: nhóm cờ chạm nhiều phần tử hơn trần vị trí một CR (`MAX_LOCATIONS`) — tách nhóm nhỏ hơn. */
+  CR_TOO_MANY_LOCATIONS: 400,
   IMPORT_NOT_FOUND: 404,
   DOC_VERSION_NOT_FOUND: 404,
   CR_NOT_FOUND: 404,
@@ -21,6 +25,10 @@ export const MODE1_ERROR_STATUS = {
   PROJECT_MODE_MISMATCH: 409,
   IMPORT_NEEDS_LATEST_CONFIRM: 409,
   IMPORT_INVALID_STATE: 409,
+  /** FLF-461 (BF 2.9a): xác nhận bố cục khi còn mục cần soạn (chưa tới 2.9a) — `meta.remaining`. */
+  LAYOUT_NOT_READY: 409,
+  /** FLF-461 (BF 2.10): chế độ 4 ký baseline khi chưa xác nhận bố cục mới (hoặc bố cục đã đổi sau xác nhận). */
+  LAYOUT_NOT_CONFIRMED: 409,
   CR_REQUIRES_BASELINE: 409,
   CR_INVALID_TRANSITION: 409,
   /** FLF-186: phần tử Spine đang được CR khác giữ khoá (thay `BLOCK_LOCKED` theo block docx). */
@@ -43,6 +51,8 @@ export const MODE1_ERROR_STATUS = {
   PACKAGE_PENDING: 409,
   /** FLF-330: gửi duyệt khi chưa có CR nào ghi vào bản nháp kể từ lần phát hành trước. */
   PACKAGE_EMPTY: 409,
+  /** FLF-466: phát hành khi nội dung (không tính cờ) đã đổi kể từ lúc gửi duyệt gói ⇒ Lead duyệt không đúng bản đã gửi. */
+  PACKAGE_CHANGED_AFTER_SUBMIT: 409,
   /** FLF-182: tắt bước luôn chạy (ghép / kiểm tra tài liệu) hoặc step đã có dữ liệu. */
   CORE_STEP_REQUIRED: 409,
   /** Mode 1 v3 (BPMN Flow 1): không chạy step / gate / bật-tắt step, không ký baseline v1, không waive cờ. */

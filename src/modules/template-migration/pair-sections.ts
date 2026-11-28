@@ -1,6 +1,11 @@
 /**
  * Ghép mục của tài liệu hiện tại (heading cũ) với mục của mẫu đích (heading mới) — hàm thuần, không AI, không DB.
  *
+ * - Heading cũ và heading mới trùng y hệt tên (đã bỏ số mục) ghép trước mọi luật khác: file mẫu có thể gán cùng `section_id` cho
+ *   hai heading anh em ("Quy tắc nghiệp vụ tổng quát" và "Hệ thống bên ngoài" cùng `fixed:1`), heading trùng tên không để mục
+ *   khung khác giành. Hai mục khung khác id vẫn không ghép theo chữ.
+ * - Heading mới cùng `section_id` với heading cha của nó (vd "Trong phạm vi" dưới "Phạm vi" cùng `slot:scope`) là heading con
+ *   của mục đó: không là lựa chọn của mục bị tách, không là mục thiếu (`children`).
  * - Mục khung (`fixed:*`, `group:*`, `slot:*`) ghép theo `section_id`. Mẫu đích có nhiều heading cùng `section_id` (IEEE tách
  *   Reliability / Availability cùng về 4.2.2) ⇒ ghép heading đầu, ghi vào `split` để BA chọn nơi đặt.
  *   Mục FPT và phần nhỏ `slot:*` chồng lấn (`overlapsOf`: 5.1 ↔ slot:business_rules) ghép với nhau như cùng một mục; một mục cũ
@@ -8,6 +13,9 @@
  * - Mục riêng (`custom:*` / `unmapped`) ghép theo `titleSimilarity` trên chữ heading đã bỏ số mục; dưới ngưỡng ⇒ chưa ghép.
  *   Một mục khung chưa ghép được còn thử ghép theo chữ với mục riêng của phía kia (mẫu mới đặt tên khác mapping), nhưng hai mục
  *   khung khác id không bao giờ ghép với nhau theo chữ.
+ * - FLF-491: heading riêng (`custom:*` / `unmapped`) có tên đúng tên trong danh mục mục khung ("1 Tổng quan sản phẩm" ⇒ `fixed:1`), hoặc
+ *   chỉ có số mục + chỗ điền ("4.2.4 …" ⇒ `fixed:4.2.4`), ghép theo id đó (`by: "title"`, "Cần xem"). Heading con cũ không có chỗ ở mẫu
+ *   đích (mục cha đã ghép, mẫu đích không còn heading con chưa có chủ trong cây con của nó) đi theo mục cha (`Follower.kind: "child"`).
  * - Heading phần tử (`feature:*`, `function:*`, UC / màn / chức năng nhận ra qua tên hoặc mã trong Spine, mục riêng lồng dưới
  *   mục chứa phần tử) và phần nối (heading rỗng) **đi theo mục khung cha** — không bao giờ vào 4 nhóm. Heading phần tử của
  *   mẫu đích chỉ là ví dụ của mẫu ⇒ bỏ qua.
@@ -15,6 +23,7 @@
 import { foldText, splitHeadingNumber, titleSimilarity } from "../import/text-similarity.js"
 import { overlapsOf } from "../import/content-slots.js"
 import { classifySection } from "../import/template-skeleton.js"
+import { catalogSectionOf } from "../import/section-catalog.js"
 
 /** Heading của tài liệu hiện tại (layout của project), theo thứ tự tài liệu. `key` duy nhất trong một migration. */
 export interface OldHeading {
@@ -50,7 +59,7 @@ export interface SectionPair {
 
 export interface Follower {
   old_key: string
-  kind: "element" | "continuation"
+  kind: "element" | "continuation" | "child"
   /** Mục khung / mục riêng cha ở tài liệu hiện tại; `null` = không có heading cha. */
   parent_old_key: string | null
 }
@@ -63,6 +72,8 @@ export interface PairingResult {
   ignored_new: string[]
   /** Mục cũ có nhiều heading cùng `section_id` ở mẫu đích (ghép heading đầu). */
   split: { old_key: string; new_keys: string[] }[]
+  /** Heading con của mẫu đích nằm cùng mục với heading cha — thuộc mục cha, không là mục thiếu. Bản ghi cũ không có field này. */
+  children?: string[]
 }
 
 export interface PairOptions {
@@ -145,6 +156,36 @@ const newElementKeys = (neu: readonly NewHeading[]): Set<string> => {
   return out
 }
 
+/** Heading mới mà heading cha gần nhất (theo cấp) mang cùng `section_id` khung — chỉ suy được khi biết cấp. */
+const childKeys = (neu: readonly NewHeading[]): Set<string> => {
+  const out = new Set<string>()
+  const stack: { level: number; sectionId: string }[] = []
+  for (const n of neu) {
+    if (n.level === undefined) continue
+    while (stack.length && stack[stack.length - 1].level >= n.level) stack.pop()
+    const parent = stack[stack.length - 1]
+    if (parent && isFrameworkId(n.section_id) && parent.sectionId === n.section_id) out.add(n.key)
+    stack.push({ level: n.level, sectionId: n.section_id })
+  }
+  return out
+}
+
+/** Heading có heading ngay sau sâu hơn (heading nhóm có mục con) — chỉ suy được khi biết cấp. */
+export const wrapperKeys = (headings: readonly { key: string; level?: number }[]): Set<string> => {
+  const out = new Set<string>()
+  headings.forEach((h, i) => {
+    const next = headings[i + 1]?.level
+    if (h.level !== undefined && next !== undefined && next > h.level) out.add(h.key)
+  })
+  return out
+}
+
+/** Id dùng để ghép theo id: id khung của heading, hoặc id mục khung suy từ danh mục khi heading đứng ngoài khung (FLF-491). */
+const effectiveId = (h: { heading_text: string; section_id: string }): string => (isFrameworkId(h.section_id) ? h.section_id : (catalogSectionOf(h.heading_text) ?? h.section_id))
+
+/** Tên heading để so trùng y hệt: bỏ số mục, gập dấu / hoa thường. */
+const exactTitle = (text: string): string => foldText(titleOf(text))
+
 /** Ghép tự động. Cùng đầu vào ⇒ cùng kết quả. */
 export const pairSections = (old: readonly OldHeading[], neu: readonly NewHeading[], options: PairOptions = {}): PairingResult => {
   const threshold = options.threshold ?? CUSTOM_PAIR_THRESHOLD
@@ -152,19 +193,48 @@ export const pairSections = (old: readonly OldHeading[], neu: readonly NewHeadin
   const ignored = newElementKeys(neu)
   const ignored_new = neu.filter((n) => ignored.has(n.key)).map((n) => n.key)
   const candidates = neu.filter((n) => !ignored.has(n.key))
+  const children = childKeys(candidates)
+  // Heading nhóm có mục con của mẫu đích ("1. Giới thiệu") không nhận id mục khung theo danh mục: bí danh "Giới thiệu" của Tổng quan
+  // làm nó giành mục cũ của mục con thật ("2.1 Góc nhìn sản phẩm")
+  const wrappers = wrapperKeys(candidates)
+  const newId = (n: NewHeading): string => (wrappers.has(n.key) && !isFrameworkId(n.section_id) ? n.section_id : effectiveId(n))
 
   const byId = new Map<string, NewHeading[]>()
-  for (const n of candidates) if (isFrameworkId(n.section_id)) byId.set(n.section_id, [...(byId.get(n.section_id) ?? []), n])
+  for (const n of candidates) {
+    const id = newId(n)
+    if (isFrameworkId(id) && !children.has(n.key)) byId.set(id, [...(byId.get(id) ?? []), n])
+  }
 
   const claimed = new Set<string>()
   const pairOf = new Map<string, SectionPair>()
   const split: PairingResult["split"] = []
 
+  // Trùng y hệt tên ghép trước (không cho mục khung cùng id giành heading của mục khác)
   for (const o of main) {
+    const title = exactTitle(o.heading_text)
+    if (!title) continue
+    const n = candidates.find((c) => !claimed.has(c.key) && !children.has(c.key) && exactTitle(c.heading_text) === title && !(isFrameworkId(o.section_id) && isFrameworkId(c.section_id) && o.section_id !== c.section_id))
+    if (!n) continue
+    claimed.add(n.key)
+    pairOf.set(o.key, { old_key: o.key, new_key: n.key, by: o.section_id === n.section_id ? "section_id" : "title", score: 1, needs_review: !!n.auto_confirmed })
+  }
+
+  for (const o of main) {
+    const exact = pairOf.get(o.key)
+    if (exact) {
+      // Ghép theo tên trùng mà cùng id: heading cùng id còn lại của mẫu đích vẫn là phần tách của mục này
+      const rest = exact.by === "section_id" ? (byId.get(effectiveId(o)) ?? []).filter((n) => !claimed.has(n.key)) : []
+      for (const n of rest) claimed.add(n.key)
+      if (rest.length) split.push({ old_key: o.key, new_keys: [exact.new_key!, ...rest.map((n) => n.key)] })
+      continue
+    }
     // Heading mới đã có chủ (hai heading cũ cùng section_id) không ghép lần nữa: heading cũ thứ hai để chưa ghép cho BA quyết
-    const found = isFrameworkId(o.section_id) ? byId.get(o.section_id)?.filter((n) => !claimed.has(n.key)) : undefined
+    const oid = effectiveId(o)
+    const found = isFrameworkId(oid) ? byId.get(oid)?.filter((n) => !claimed.has(n.key)) : undefined
     if (!found?.length) continue
-    pairOf.set(o.key, { old_key: o.key, new_key: found[0].key, by: "section_id", score: 1, needs_review: !!found[0].auto_confirmed })
+    // Ghép nhờ danh mục (id thật của một phía không là id khung đó) ⇒ "Cần xem"
+    const viaCatalog = o.section_id !== oid || found[0].section_id !== oid
+    pairOf.set(o.key, viaCatalog ? { old_key: o.key, new_key: found[0].key, by: "title", score: 0.9, needs_review: true } : { old_key: o.key, new_key: found[0].key, by: "section_id", score: 1, needs_review: !!found[0].auto_confirmed })
     for (const n of found) claimed.add(n.key)
     if (found.length > 1) split.push({ old_key: o.key, new_keys: found.map((n) => n.key) })
   }
@@ -173,7 +243,7 @@ export const pairSections = (old: readonly OldHeading[], neu: readonly NewHeadin
   for (const o of main) {
     if (pairOf.has(o.key) || !isFrameworkId(o.section_id)) continue
     const overlap = new Set(overlapsOf(o.section_id))
-    const found = candidates.filter((n) => !claimed.has(n.key) && overlap.has(n.section_id))
+    const found = candidates.filter((n) => !claimed.has(n.key) && !children.has(n.key) && overlap.has(n.section_id))
     if (!found.length) continue
     pairOf.set(o.key, { old_key: o.key, new_key: found[0].key, by: "overlap", score: 1, needs_review: !!found[0].auto_confirmed })
     for (const n of found) claimed.add(n.key)
@@ -187,6 +257,9 @@ export const pairSections = (old: readonly OldHeading[], neu: readonly NewHeadin
   oldLeft.forEach((o, oi) =>
     newLeft.forEach((n, ni) => {
       if (isFrameworkId(o.section_id) && isFrameworkId(n.section_id)) return
+      // Heading nhóm cũ chỉ là khung (mục con đi chỗ khác): ghép theo chữ gần giống ("2 Yêu cầu người dùng" ↔ "3. Yêu cầu") chỉ tạo
+      // cặp heading rỗng kèm nhãn "Cần xem". Trùng y hệt tên đã ghép ở lượt đầu; còn lại để phân nhóm (khung trống bỏ, có phần nối thì hỏi BA)
+      if (o.section_id.startsWith("group:")) return
       const score = titleSimilarity(titleOf(o.heading_text), titleOf(n.heading_text))
       if (score >= threshold) scored.push({ o, n, score, oi, ni })
     })
@@ -198,11 +271,47 @@ export const pairSections = (old: readonly OldHeading[], neu: readonly NewHeadin
     pairOf.set(o.key, { old_key: o.key, new_key: n.key, by: "title", score: Math.round(score * 100) / 100, needs_review: score < TITLE_REVIEW_BELOW || !!n.auto_confirmed })
   }
 
+  // FLF-491: heading con cũ không có chỗ ở mẫu đích đi theo mục cha đã ghép
+  const childOf = new Map<string, string>()
+  const parentStack: OldHeading[] = []
+  const levelOfNew = (i: number): number | undefined => neu[i].level
+  for (const o of main) {
+    while (parentStack.length && parentStack[parentStack.length - 1].level >= o.level) parentStack.pop()
+    const nearest = parentStack[parentStack.length - 1]
+    parentStack.push(o)
+    if (!nearest || pairOf.get(o.key)?.new_key || o.section_id === "fixed:I") continue
+    const a = childOf.has(nearest.key) ? main.find((m) => m.key === childOf.get(nearest.key)) : nearest
+    const target = a ? pairOf.get(a.key)?.new_key : null
+    if (!a || !target) continue
+    const at = neu.findIndex((n) => n.key === target)
+    const base = levelOfNew(at)
+    if (at < 0 || base === undefined) continue
+    let free = false
+    for (let j = at + 1; j < neu.length; j++) {
+      const lv = levelOfNew(j)
+      if (lv === undefined || lv <= base) break
+      if (!ignored.has(neu[j].key) && !children.has(neu[j].key) && !claimed.has(neu[j].key)) free = true
+    }
+    if (free) continue
+    const eo = effectiveId(o)
+    const ea = effectiveId(a)
+    const en = newId(neu[at])
+    const related = (x: string, y: string): boolean => x === y || overlapsOf(x).includes(y) || overlapsOf(y).includes(x)
+    if (isFrameworkId(eo) && !related(eo, ea) && !related(eo, en)) continue
+    childOf.set(o.key, a.key)
+  }
+  for (const [childKey, parentKey] of childOf) {
+    followers.push({ old_key: childKey, kind: "child", parent_old_key: parentKey })
+  }
+  for (const f of followers) if (f.parent_old_key && childOf.has(f.parent_old_key) && f.kind !== "child") f.parent_old_key = childOf.get(f.parent_old_key)!
+  const mainPaired = main.filter((o) => !childOf.has(o.key))
+
   return {
-    pairs: main.map((o) => pairOf.get(o.key) ?? { old_key: o.key, new_key: null, by: null, score: 0, needs_review: false }),
+    pairs: mainPaired.map((o) => pairOf.get(o.key) ?? { old_key: o.key, new_key: null, by: null, score: 0, needs_review: false }),
     followers,
     ignored_new,
-    split
+    split,
+    children: [...children].filter((k) => !claimed.has(k))
   }
 }
 

@@ -21,6 +21,10 @@ export interface CrClarification {
   answers: string[]
   /** Phase 7: đáp án AI gợi ý cho từng câu hỏi (cùng thứ tự `questions`); CR cũ không có. */
   suggestions?: string[][]
+  /** Chỉ số các câu là cảnh báo "yêu cầu không hợp lý" (BF §3.2 C-4); gợi ý đầu của chúng là "Vẫn làm". CR cũ không có. */
+  warning_questions?: number[]
+  /** FLF-474: loại từng câu (song song `questions`): mâu thuẫn / cảnh báo hỏi cả khi hết vòng, hay câu mơ hồ. CR cũ không có. */
+  kinds?: ("contradiction" | "ambiguous")[]
 }
 
 /**
@@ -47,6 +51,17 @@ export interface CrAmendment {
   after_round: number
 }
 
+/**
+ * FLF-492 (BF §3.2, M4-02): mô tả "AI viết gọn" của một dòng CR trong Record of Changes. Lưu theo (loại A / M / D, ngôn ngữ);
+ * `changes_hash` là dấu vân tay các thay đổi của dòng lúc viết gọn — thay đổi lệch ⇒ bỏ mô tả này, dùng câu dựng sẵn.
+ */
+export interface CrRecordSummary {
+  kind: "A" | "M" | "D"
+  text: string
+  language: "vi" | "en"
+  changes_hash: string
+}
+
 export interface IChangeRequest extends Document {
   projectId: mongoose.Types.ObjectId
   cr_id: string
@@ -64,12 +79,23 @@ export interface IChangeRequest extends Document {
    * Chỉ là **gợi ý**: C-2 đọc lệnh, C-3 thêm `targets` vào đích, C-4 thấy op đề xuất của vị trí — mọi nút vẫn chạy.
    */
   seed: CrSeed | null
+  /** FLF-445: cờ mà CR này sửa (tạo từ một nhóm cờ ở hàng việc chờ quyết). CR mở giữ các cờ này khỏi hàng đợi. */
+  flag_ids: string[]
+  /** FLF-492: mô tả dòng Record of Changes do AI viết gọn khi phát hành (tuỳ chọn). CR cũ: không có. */
+  record_summaries?: CrRecordSummary[]
   materials: CrMaterial[]
   /**
    * Mode 1 v3 phase 7: dữ kiện C-2 báo vẫn thiếu khi buộc đi tiếp (hết vòng hỏi) ⇒ C-4 viết nhưng ghi giả định.
    * Rỗng khi CR + câu trả lời + tài liệu đã đủ.
    */
   missing_info: string[]
+  /**
+   * C-2 đã cảnh báo yêu cầu không hợp lý và người yêu cầu chọn làm tiếp ⇒ C-3 tạo mọi vị trí với `kept_intent`, C-4 không
+   * cảnh báo lại cùng chuyện đó. Nội bộ, không có trong DTO.
+   */
+  proceed_after_warning: boolean
+  /** C-2 đọc câu trả lời vòng vừa rồi là lời rút lại yêu cầu ⇒ FE hỏi có huỷ CR không. Tính lại mỗi lượt C-2. */
+  withdraw_suggested: boolean
   amendments: CrAmendment[]
   /** Version tài liệu lúc tạo CR; ghi Track Changes lên version mới nhất lúc write. */
   base_doc_version: string
@@ -88,6 +114,11 @@ export interface CrSeed {
   ops: Record<string, unknown>[]
   /** Phần tử Spine bị op chạm (`actors[id=A01]`, `project`). */
   targets: string[]
+  /**
+   * FLF-449 (BF §3.6.1): CR tạo từ danh sách rút mà BA đã trả lời câu hỏi ở thẻ hỏi ⇒ bỏ bước làm rõ (C-2), đi thẳng phân
+   * tích ảnh hưởng với `targets` (câu trả lời đã nằm trong `clarifications`). CR cũ: không có.
+   */
+  skip_clarify?: boolean
 }
 
 const opts = { _id: false }
@@ -116,7 +147,19 @@ const changeRequestSchema = new Schema<IChangeRequest>(
       default: null
     },
     clarifications: {
-      type: [new Schema({ round: { type: Number, required: true, min: 1 }, questions: [String], answers: [String], suggestions: { type: [[String]], default: [] } }, opts)],
+      type: [
+        new Schema(
+          {
+            round: { type: Number, required: true, min: 1 },
+            questions: [String],
+            answers: [String],
+            suggestions: { type: [[String]], default: [] },
+            warning_questions: { type: [Number], default: [] },
+            kinds: { type: [String], default: [] }
+          },
+          opts
+        )
+      ],
       default: []
     },
     targets: {
@@ -124,9 +167,29 @@ const changeRequestSchema = new Schema<IChangeRequest>(
       default: () => ({ entity_paths: [], keywords: [] })
     },
     seed: {
-      type: new Schema({ instruction: { type: String, default: null }, ops: { type: [Schema.Types.Mixed], default: [] }, targets: { type: [String], default: [] } }, opts),
+      type: new Schema(
+        { instruction: { type: String, default: null }, ops: { type: [Schema.Types.Mixed], default: [] }, targets: { type: [String], default: [] }, skip_clarify: { type: Boolean, default: false } },
+        opts
+      ),
       default: null
     },
+    flag_ids: { type: [String], default: [] },
+    record_summaries: {
+      type: [
+        new Schema(
+          {
+            kind: { type: String, enum: ["A", "M", "D"], required: true },
+            text: { type: String, required: true, maxlength: 400 },
+            language: { type: String, enum: ["vi", "en"], required: true },
+            changes_hash: { type: String, required: true }
+          },
+          opts
+        )
+      ],
+      default: []
+    },
+    proceed_after_warning: { type: Boolean, default: false },
+    withdraw_suggested: { type: Boolean, default: false },
     materials: {
       type: [
         new Schema(

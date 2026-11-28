@@ -22,9 +22,9 @@ import { trackedPolicySince } from "../doc-version/migration-tracked-policy.js"
 import { loadLayout, titleOfSection } from "../import/gap-report.service.js"
 import { docFileStore } from "../doc-version/doc-file.store.js"
 import { DocVersion } from "../doc-version/doc-version.model.js"
-import { latestDocVersion } from "../doc-version/doc-version.service.js"
 import { renderVersionFile } from "../doc-version/render-version.js"
-import { nextMinor } from "../doc-version/versioning.js"
+import { withVersionSlot } from "../doc-version/version-allocator.js"
+import { authorNameOf } from "../doc-version/system-change.service.js"
 import { stripRecord } from "../import/check.service.js"
 import { mode1RuleProfileFor } from "../import/mode1-guard.js"
 import { Project } from "../project/project.model.js"
@@ -32,12 +32,16 @@ import { assemble } from "../render/assemble.service.js"
 import * as flagsService from "../spine/flags.service.js"
 import { applyTransaction, planTransaction, revertChanges } from "../spine/op-engine.js"
 import { userOpSchema, type Op } from "../spine/op.types.js"
+import { findingOps } from "../import/check.service.js"
+import { pathLabel } from "../spine/human-labels.js"
+import { sectionOfElement } from "./spine-location.js"
+import { crReplacedValues, sweepOldValues, OLD_VALUE_LEFT_RULE } from "./old-value-left.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Change } from "../spine/spine.types.js"
-import { ChangeRequest, CrCounter, type IChangeRequest } from "./change-request.model.js"
-import { formatCrId } from "./change-request.constants.js"
-import type { IChangeLocation } from "./change-location.model.js"
+import type { IChangeRequest } from "./change-request.model.js"
+import { ChangeLocation, type IChangeLocation } from "./change-location.model.js"
 import { unlockPaths } from "./lock.service.js"
+import { keptOriginalAckOps } from "./diagram-location.js"
 import { unchangedSince } from "./spine-location.js"
 import { valueChanged } from "./verify.service.js"
 import { scheduleEmbeddingSync } from "./embedding/embedding-sync.service.js"
@@ -60,57 +64,76 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
   const txn = { base_version: baseVersion, ops, by: cr.cr_id, reason: `${cr.cr_id}: ${cr.title}`, step_id: null }
   const plan = ops.length ? planTransaction(current, txn, { startSeq: 1 }) : null
 
-  // 1. File version mới = render Spine dự kiến
-  const version = (await latestDocVersion(projectId))!
-  const next = nextMinor(version.version)
+  // 1. File version mới = render Spine dự kiến. Số version cấp nguyên tử (FLF-466): CR, đổi mẫu, vẽ lại màn, phát hành không trùng số
+  const author = `${cr.cr_id} (${await authorNameOf(userId)})`
   const projectName = (await Project.findById(projectId, { name: 1 }).lean())?.name ?? "SRS"
-  const templateSource = await captureTemplateSourceBinding(projectId)
-  const recordSnapshot = templateSource ? await listChangesForRecord(projectId) : null
-  const buffer = await renderVersionFile(projectId, projectName, plan?.spine ?? current, {
-    templateSource,
-    ...(recordSnapshot ? { recordChanges: recordSnapshot } : {}),
-    version: next,
-    stampSource: "cr_revision",
-    pendingRecord: (plan?.changes ?? []).map((c) => ({ txn: c.txn, at: c.at, by: c.by, reason: c.reason ?? null, op: c.op, path: c.path, step_id: c.step_id ?? null }))
-  })
-  const fileRef = await docFileStore().save(buffer, { projectId, kind: "version", name: next })
+  const decidedAt = new Date()
   const layout = await loadLayout(projectId)
   const comments: TrackedComment[] = approved
     .filter((l) => l.conclusion === "comment" && l.proposal?.comment_text)
     .map((l) => ({ section_title: titleOfSection(current, l.section_id, layout), text: l.proposal!.comment_text! }))
-  const decidedAt = new Date()
-  // D11: giữa version trước và lần ghi này có đổi mẫu ⇒ chỉ so nội dung (bỏ heading + chữ hướng dẫn); đổi mẫu có dịch ⇒ không tạo bản đánh dấu
-  const policy = await trackedPolicySince(projectId, version.createdAt)
-  const tracked = (file: Buffer) => (policy === "none" ? Promise.resolve(null) : saveTracked(projectId, cr.cr_id, version.file_ref, file, next, comments, decidedAt, policy === "content_only"))
-  const trackedRef = await tracked(buffer)
 
-  let versionCreated = false
-  let spineVersion = record.spine_version
-  try {
-    // 2. Version mới
-    await DocVersion.create({
-      projectId,
+  const slot = await withVersionSlot(projectId, "minor", async ({ latest, next }) => {
+    const templateSource = await captureTemplateSourceBinding(projectId)
+    const recordSnapshot = templateSource ? await listChangesForRecord(projectId) : null
+    const buffer = await renderVersionFile(projectId, projectName, plan?.spine ?? current, {
+      templateSource,
+      ...(recordSnapshot ? { recordChanges: recordSnapshot } : {}),
       version: next,
-      kind: "cr_revision",
-      file_ref: fileRef,
-      tracked_file_ref: trackedRef,
-      based_on: version.version,
-      cr_ids: [cr.cr_id],
-      baseline_ref: null,
-      template_source: templateSource,
-      record_snapshot: recordSnapshot ? [...recordSnapshot, ...(plan?.changes ?? []).map((c) => ({ txn: c.txn, at: c.at, by: c.by, reason: c.reason ?? null, op: c.op, path: c.path, step_id: c.step_id ?? null }))] : null,
-      spine_snapshot: templateSource ? (plan?.spine ?? current) : null,
-      created_by: userId
+      stampSource: "cr_revision",
+      pendingRecord: (plan?.changes ?? []).map((c) => ({ txn: c.txn, at: c.at, by: c.by, reason: c.reason ?? null, op: c.op, path: c.path, step_id: c.step_id ?? null }))
     })
-    versionCreated = true
+    const fileRef = await docFileStore().save(buffer, { projectId, kind: "version", name: next })
+    // D11: giữa version trước và lần ghi này có đổi mẫu ⇒ chỉ so nội dung (bỏ heading + chữ hướng dẫn); đổi mẫu có dịch ⇒ không tạo bản đánh dấu
+    const policy = await trackedPolicySince(projectId, latest.createdAt)
+    const tracked = (file: Buffer) => (policy === "none" ? Promise.resolve(null) : saveTracked(projectId, cr.cr_id, author, latest.file_ref, file, next, comments, decidedAt, policy === "content_only"))
+    const trackedRef = await tracked(buffer)
 
-    // 3. Spine — bước cuối; `base_version` chặn ghi đè nếu Spine đổi từ lúc chạy khô
-    if (ops.length) spineVersion = (await applyTransaction(projectId, txn)).spine_version
-  } catch (err) {
-    if (versionCreated) await DocVersion.deleteOne({ projectId, version: next })
-    await docFileStore().remove(fileRef)
-    if (trackedRef) await docFileStore().remove(trackedRef)
-    throw err
+    let versionCreated = false
+    let spineVersion = record.spine_version
+    try {
+      // 2. Version mới (FLF-466: luôn lưu `spine_snapshot` để in lại / dịch bản nháp)
+      await DocVersion.create({
+        projectId,
+        version: next,
+        kind: "cr_revision",
+        file_ref: fileRef,
+        tracked_file_ref: trackedRef,
+        based_on: latest.version,
+        cr_ids: [cr.cr_id],
+        baseline_ref: null,
+        template_source: templateSource,
+        record_snapshot: recordSnapshot ? [...recordSnapshot, ...(plan?.changes ?? []).map((c) => ({ txn: c.txn, at: c.at, by: c.by, reason: c.reason ?? null, op: c.op, path: c.path, step_id: c.step_id ?? null }))] : null,
+        spine_snapshot: plan?.spine ?? current,
+        created_by: userId
+      })
+      versionCreated = true
+
+      // 3. Spine — bước cuối; `base_version` chặn ghi đè nếu Spine đổi từ lúc chạy khô
+      if (ops.length) spineVersion = (await applyTransaction(projectId, txn)).spine_version
+    } catch (err) {
+      if (versionCreated) await DocVersion.deleteOne({ projectId, version: next })
+      await docFileStore().remove(fileRef)
+      if (trackedRef) await docFileStore().remove(trackedRef)
+      throw err
+    }
+    return { next, fileRef, trackedRef, tracked, spineVersion }
+  })
+  const { next, fileRef, trackedRef, tracked } = slot
+  // `let`: bước "giữ hình gốc" bên dưới có thể ghi thêm một lượt
+  let { spineVersion } = slot
+
+  // "Giữ hình gốc": đóng dấu hình được giữ theo dữ liệu sau CR ⇒ cờ "Hình gốc lệch dữ liệu" không bật ngay lại. Lượt ghi riêng
+  // sau cùng: không đổi chữ hay hình của file vừa in; lỗi chỉ ghi log (cờ vàng còn đó, không mất dữ liệu)
+  // `approved` chỉ có vị trí sửa / ghi chú; vị trí "giữ hình gốc" là `not_related` do người dùng tự chọn
+  const kept = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id, found_by: "diagram", conclusion: "not_related", manual: true })
+  const ackOps = keptOriginalAckOps(plan?.spine ?? current, kept)
+  if (ackOps.length) {
+    try {
+      spineVersion = (await applyTransaction(projectId, { base_version: spineVersion, ops: ackOps, by: cr.cr_id, reason: `${cr.cr_id}: giữ hình gốc`, step_id: null })).spine_version
+    } catch (err) {
+      console.warn(`[C-7] ${cr.cr_id}: đã ghi ${next} nhưng ghi nhận "giữ hình gốc" lỗi - cờ hình gốc lệch còn hiện`, err)
+    }
   }
 
   // FLF-318: CR thêm use case / màn ⇒ bố cục màn mới vẽ như chat FLF-311 (wireframe của model), không để cờ `diagram_stale`
@@ -123,6 +146,7 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
   } catch (err) {
     console.warn(`[C-7] ${cr.cr_id}: đã ghi ${next} nhưng recompute cờ lỗi - cờ sẽ được tính lại ở lần recompute sau`, err)
   }
+  await flagOldValuesLeft(projectId, cr, approved)
   await unlockPaths(projectId, cr.cr_id)
   try {
     const latest = await spineRepository.get(projectId)
@@ -133,6 +157,37 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
   // Spine vừa đổi ⇒ embed lại phần tử đổi chữ cho C-3 của CR sau — chạy nền, không chặn/không làm hỏng C-7
   if (ops.length) scheduleEmbeddingSync(projectId)
   return next
+}
+
+/**
+ * FLF-483 (lỗi #32): lượt quét sau khi ghi — CR đổi một giá trị mà phần tử khác (hoặc chữ spec của mockup) còn ghi giá trị cũ
+ * ⇒ cờ vàng cho từng phần tử, không chặn. Bỏ phần tử C-3 kết luận "không liên quan" và chỗ BA đã chọn "giữ nguyên". Lỗi chỉ
+ * ghi log: Spine đã ghi, cờ lệch sẽ không làm hỏng bản ghi.
+ */
+const flagOldValuesLeft = async (projectId: string, cr: IChangeRequest, approved: readonly IChangeLocation[]): Promise<void> => {
+  try {
+    const replaced = crReplacedValues(approved)
+    if (!replaced.size) return
+    const notRelated: string[] = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id, conclusion: "not_related" }).distinct("path")
+    const kept = approved.filter((l) => l.kept_violations?.includes(OLD_VALUE_LEFT_RULE)).map((l) => l.path)
+    const record = await spineRepository.get(projectId)
+    if (!record) return
+    const spine = stripRecord(record)
+    const hits = sweepOldValues(spine, replaced, new Set([...notRelated, ...kept]))
+    if (!hits.length) return
+    const findings = hits.map((h) => ({
+      rule: "old_value_left",
+      section_id: sectionOfElement(spine, h.path),
+      target_id: h.path,
+      block_ids: [],
+      message: `${pathLabel(h.path)} còn ghi giá trị cũ ${h.values.map((v) => `“${v}”`).join(", ")} ở ${h.places.join(", ")} sau ${cr.cr_id}. Sửa cho khớp hoặc giữ nguyên nếu con số này mang nghĩa khác`
+    }))
+    const ops = findingOps(spine, findings, "cr_old_value_left")
+    if (!ops.length) return
+    await applyTransaction(projectId, { base_version: record.spine_version, ops, by: cr.cr_id, reason: `${cr.cr_id}: còn giá trị cũ`, step_id: null })
+  } catch (err) {
+    console.warn(`[C-7] ${cr.cr_id}: quét giá trị cũ còn sót lỗi - bỏ qua`, err)
+  }
 }
 
 /**
@@ -164,7 +219,7 @@ const redrawDiagrams = async (
     const buffer = await renderVersionFile(projectId, projectName, latest, { version, stampSource: "cr_revision", templateSource, ...(stored?.record_snapshot ? { recordChanges: stored.record_snapshot } : {}) })
     const redone = await docFileStore().save(buffer, { projectId, kind: "version", name: version })
     const redoneTracked = await tracked(buffer)
-    await DocVersion.updateOne({ projectId, version }, { $set: { file_ref: redone, tracked_file_ref: redoneTracked, ...(templateSource ? { spine_snapshot: latest } : {}) } })
+    await DocVersion.updateOne({ projectId, version }, { $set: { file_ref: redone, tracked_file_ref: redoneTracked, spine_snapshot: latest } })
     await docFileStore().remove(refs.file)
     if (refs.tracked) await docFileStore().remove(refs.tracked)
   } catch (err) {
@@ -176,6 +231,7 @@ const redrawDiagrams = async (
 const saveTracked = async (
   projectId: string,
   crId: string,
+  author: string,
   prevRef: string,
   file: Buffer,
   version: string,
@@ -184,7 +240,7 @@ const saveTracked = async (
   contentOnly = false
 ): Promise<string | null> => {
   try {
-    const out = await buildTrackedDocx(await docFileStore().load(prevRef), file, { author: crId, date }, comments, { contentOnly })
+    const out = await buildTrackedDocx(await docFileStore().load(prevRef), file, { author, date }, comments, { contentOnly })
     return await docFileStore().save(out.data, { projectId, kind: "version", name: `${version}_tracked` })
   } catch (err) {
     console.warn(`[C-7] ${crId}: dựng bản có đánh dấu của ${version} lỗi - chỉ còn bản sạch`, err)
@@ -192,37 +248,16 @@ const saveTracked = async (
   }
 }
 
-// ─── đường ghi riêng của đổi mẫu (CR nguồn `template_migration`) ──
+// ─── đường ghi riêng của đổi mẫu (FLF-466: không còn CR giả) ──
 
 /**
- * CR nguồn `template_migration` không đi qua C-1..C-7: không có vị trí / nhóm / duyệt, client không tạo được (nguồn này nằm ngoài
- * `NEW_CR_SOURCE_KINDS`). Nó chỉ là "người ghi" của các Change do lần đổi mẫu sinh ra (`changes[].by = cr_id`) và là dấu vết trong
- * lịch sử CR. Mọi ghi Spine vẫn đi qua op engine. Tạo lại an toàn: tra theo `source.ref = migrationId` trước khi tạo.
+ * Người ghi của Change do đổi mẫu sinh ra là `system_change:<migrationId>` (`systemChangeActor`) — không phải CR, không có vị trí / nhóm / duyệt.
+ * Mọi ghi Spine vẫn đi qua op engine; client không tạo được nguồn này.
  */
-export const ensureTemplateMigrationCr = async (projectId: string, migrationId: string, userId: string, title: string): Promise<string> => {
-  const existing = await ChangeRequest.findOne({ projectId, "source.kind": "template_migration", "source.ref": migrationId }, { cr_id: 1 }).lean()
-  if (existing) return existing.cr_id
-  const version = await latestDocVersion(projectId)
-  const counter = await CrCounter.findOneAndUpdate({ projectId }, { $inc: { seq: 1 } }, { upsert: true, returnDocument: "after" })
-  const cr = await ChangeRequest.create({
-    projectId,
-    cr_id: formatCrId(counter.seq),
-    title: title.slice(0, 200),
-    description: "Chuyển nội dung sang mẫu mới (do hệ thống ghi khi áp dụng đổi mẫu).",
-    source: { kind: "template_migration", ref: migrationId, note: null },
-    requester: "FlintFlow",
-    status: "written",
-    base_doc_version: version?.version ?? "0.1",
-    result_doc_version: null,
-    created_by: userId,
-    submitted_at: new Date(),
-    decided_by: null
-  })
-  return cr.cr_id
-}
 
 export interface TemplateMigrationWriteInput {
-  crId: string
+  /** `system_change:<migrationId>` (`systemChangeActor`). */
+  by: string
   /** Id lô (bắt đầu bằng tiền tố `template-migration:`) — nhận ra Change của lần đổi mẫu và biết bước đã ghi chưa. */
   txn: string
   reason: string
@@ -234,15 +269,15 @@ export const writeTemplateMigrationOps = async (projectId: string, ops: readonly
   const head = await spineRepository.versionHead(projectId)
   if (!head) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   if (!ops.length) return head.spine_version
-  const applied = await applyTransaction(projectId, { base_version: input.baseVersion ?? head.spine_version, ops: [...ops], by: input.crId, reason: input.reason, step_id: null, txn: input.txn })
+  const applied = await applyTransaction(projectId, { base_version: input.baseVersion ?? head.spine_version, ops: [...ops], by: input.by, reason: input.reason, step_id: null, txn: input.txn })
   if (applied.changes.length) scheduleEmbeddingSync(projectId)
   return applied.spine_version
 }
 
 /** Đảo đúng các Change đã chọn (theo `before`) trong một lô mang `txn` của lần đổi mẫu. Change đã bị ghi đè sau đó ⇒ op engine từ chối (`revert_conflict`). */
-export const revertTemplateMigrationChanges = async (projectId: string, changes: Change[], input: Pick<TemplateMigrationWriteInput, "crId" | "txn" | "baseVersion">): Promise<number> => {
+export const revertTemplateMigrationChanges = async (projectId: string, changes: Change[], input: Pick<TemplateMigrationWriteInput, "by" | "txn" | "baseVersion">): Promise<number> => {
   if (!changes.length) return (await spineRepository.versionHead(projectId))?.spine_version ?? 0
-  const applied = await revertChanges(projectId, changes, { by: input.crId, txn: input.txn, ...(input.baseVersion !== undefined ? { base_version: input.baseVersion } : {}) })
+  const applied = await revertChanges(projectId, changes, { by: input.by, txn: input.txn, ...(input.baseVersion !== undefined ? { base_version: input.baseVersion } : {}) })
   scheduleEmbeddingSync(projectId)
   return applied.spine_version
 }

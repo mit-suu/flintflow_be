@@ -18,7 +18,9 @@ import {
   countOpenFlags,
   crossProjection,
   elementSections,
+  excludedCheckSections,
   findingOps,
+  hasGoalSection,
   runLimited,
   semanticBatchStep,
   semanticBatches,
@@ -30,13 +32,14 @@ import { IMPORT_SEMANTIC_RULE, MODE1_RULE_PROFILE } from "./mode1-rule-profile.j
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FULL: Spine = spineSchema.parse(JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../fixtures/spine-fixture-19-screens.json"), "utf8")))
 
-const EXCLUDED = ["array_empty", "section_empty", "section_stale_at_baseline", "section_awaiting_reaccept", "screen_pending_at_baseline", "orphan_screen_at_baseline", "orphan_entity_at_baseline", "non_english_content", "usecase_no_function", "usecase_name_style", "system_name_missing"]
-const DOWNGRADED = ["nfr_missing_number", "usecase_relation_invalid"]
+const EXCLUDED = ["array_empty", "section_empty", "section_stale_at_baseline", "section_awaiting_reaccept", "screen_pending_at_baseline", "orphan_screen_at_baseline", "orphan_entity_at_baseline", "non_english_content", "usecase_no_function", "usecase_name_style", "system_name_missing", "source_missing"]
+// Theo flow 18/11: NFR thiếu số đo là tầng 3 theo luật ⇒ đỏ cả ở chế độ 1, không hạ vàng nữa
+const DOWNGRADED = ["usecase_relation_invalid"]
 
 const rulesOf = (c: FlagCandidate[]) => new Set(c.map((f) => f.rule_id))
 
 describe("hồ sơ luật mode 1", () => {
-  it("cấu hình một chỗ: 11 luật loại trừ, 2 luật hạ mức, đều là luật có thật", () => {
+  it("cấu hình một chỗ: 12 luật loại trừ, 1 luật hạ mức, đều là luật có thật", () => {
     expect([...MODE1_RULE_PROFILE.exclude].sort()).toEqual([...EXCLUDED].sort())
     expect([...MODE1_RULE_PROFILE.downgrade].sort()).toEqual([...DOWNGRADED].sort())
     const known = new Set(RULES.map((r) => r.rule_id))
@@ -49,7 +52,8 @@ describe("hồ sơ luật mode 1", () => {
       level: r.level,
       rule_id: r.rule_id,
       section_id: "fixed:1",
-      target_id: null,
+      // NFR cụ thể thiếu số đo (target_id có) - khác với "chưa có NFR nào" (target_id null, xem test riêng)
+      target_id: r.rule_id === "nfr_missing_number" ? "N01" : null,
       message: r.rule_id,
       remediation_step: "S-1"
     }))
@@ -60,8 +64,28 @@ describe("hồ sơ luật mode 1", () => {
       else if (DOWNGRADED.includes(r.rule_id)) expect(hit?.level, r.rule_id).toBe("yellow")
       else expect(hit?.level, r.rule_id).toBe(r.level)
     }
-    // giữ đỏ: dead_reference, render_error, diagram_stale, unconfirmed_assumption, template_section_migration_missing (chỉ sinh khi hồ sơ mang danh sách mục thiếu sau đổi mẫu)
-    expect(out.filter((c) => c.level === "red").map((c) => c.rule_id).sort()).toEqual(["dead_reference", "diagram_stale", "render_error", "template_section_migration_missing", "unconfirmed_assumption"])
+    // giữ đỏ: dead_reference, render_error, diagram_stale, unconfirmed_assumption, duplicate_name, vague_wording, nfr_missing_number
+    // (luật chất lượng chạy cả chế độ 1), original_text_mentions_changed, template_section_empty / _migration_missing (chỉ sinh khi hồ sơ mang mẫu)
+    expect(out.filter((c) => c.level === "red").map((c) => c.rule_id).sort()).toEqual([
+      "dead_reference",
+      "diagram_stale",
+      "duplicate_name",
+      "nfr_missing_number",
+      "original_text_mentions_changed",
+      "render_error",
+      "template_section_empty",
+      "template_section_migration_missing",
+      "unconfirmed_assumption",
+      "vague_wording"
+    ])
+  })
+
+  it("NFR có mà thiếu số đo ⇒ đỏ ở chế độ 1; 'chưa có NFR nào' là mảng rỗng ⇒ vàng (cùng lý do loại array_empty)", () => {
+    const spine = createEmptySpine({ name: "Lumen" })
+    spine.nfrs = [{ id: "N01", category: "performance", statement: "Pages load in a time", kind: "quantitative", priority: null }]
+    const flags = runDeterministicCheck(spine, [], { atBaseline: true, ruleProfile: MODE1_RULE_PROFILE }).filter((f) => f.rule_id === "nfr_missing_number")
+    expect(flags.find((f) => f.target_id === "N01")?.level).toBe("red")
+    expect(flags.find((f) => f.target_id === null && f.message.includes("độ tin cậy"))?.level).toBe("yellow")
   })
 
   it("Spine rỗng (import chưa trích được gì): mode 1 không có cờ đỏ - mục FPT thiếu không bắt buộc, chỉ vào gap report", () => {
@@ -281,5 +305,70 @@ describe("1.11 map-reduce - chia lô, phạm vi, kiểm chéo", () => {
     })
     expect(started).toEqual([1, 2])
     expect(out.map((r) => r?.ok)).toEqual([true, false, undefined, undefined, undefined])
+  })
+})
+
+describe("FLF-454 - phạm vi AI rà ở bước 1.9", () => {
+  const blk = (n: number, section: string | null, text: string, extra: Partial<CheckBlock> = {}): CheckBlock => ({
+    block_id: `B${String(n).padStart(4, "0")}`,
+    section_id: section,
+    text,
+    ...extra
+  })
+  const ids = (blocks: CheckBlock[], scope = {}) => semanticBatches(blocks, 48_000, scope).flatMap((b) => b.lines.split("\n").map((l) => /^\[(B\d+)\]/.exec(l)![1]))
+
+  it("section Ngoài phạm vi (và mục còn trống theo cấu trúc đích) không có trong lô gửi AI", () => {
+    const blocks = [blk(1, "fixed:3.1", "Real"), blk(2, "custom:CS01", "Out of scope text"), blk(3, "fixed:4.2.3", "Real too")]
+    const excluded = excludedCheckSections({
+      sections: [
+        { section_id: "fixed:3.1", status: "present" },
+        { section_id: "custom:CS01", status: "out_of_scope" },
+        { section_id: "fixed:4.2.3", status: "present" }
+      ]
+    })
+    expect(ids(blocks, { excluded_sections: excluded })).toEqual(["B0001", "B0003"])
+    expect(semanticBatches(blocks, 48_000, { excluded_sections: excluded })[0].section_ids).toEqual(["fixed:3.1", "fixed:4.2.3"])
+    // Không truyền phạm vi ⇒ giữ hết
+    expect(ids(blocks)).toEqual(["B0001", "B0002", "B0003"])
+  })
+
+  it("mục còn trống: chỉ heading (không block), chữ trắng, hoặc chỉ chữ hướng dẫn lớp 1-3 ⇒ không vào lô; lớp 4 chưa chắc vẫn rà", () => {
+    const blocks = [
+      blk(1, "fixed:3.1", "Real"),
+      blk(2, "fixed:3.2", "   "),
+      blk(3, "fixed:3.3", "[Describe the scope here]", { guidance_layer: 2 }),
+      blk(4, "fixed:3.4", "Maybe guidance", { guidance_layer: 4 })
+    ]
+    expect(ids(blocks)).toEqual(["B0001", "B0004"])
+    // mục thiếu theo cấu trúc đích cũng bị loại
+    const excluded = excludedCheckSections({ sections: [{ section_id: "fixed:3.4", status: "missing" }] })
+    expect(ids(blocks, { excluded_sections: excluded })).toEqual(["B0001"])
+  })
+
+  it("mục tự sinh: Record of Changes, mục lục, bìa không vào lô", () => {
+    const blocks = [blk(1, "fixed:I", "v0.1 initial"), blk(2, "custom:CS01", "1. Intro ..... 3"), blk(3, "custom:CS02", "Project X"), blk(4, "fixed:3.1", "Real")]
+    const excluded = excludedCheckSections(null, [
+      { section_id: "custom:CS01", heading_text: "Mục lục" },
+      { section_id: "custom:CS02", heading_text: "Cover Page" },
+      { section_id: "fixed:3.1", heading_text: "3.1 Functional Requirements" }
+    ])
+    expect([...excluded].sort()).toEqual(["custom:CS01", "custom:CS02"])
+    // fixed:I tự sinh luôn bị loại, kể cả khi không có bảng heading
+    expect(ids(blocks, { excluded_sections: excluded })).toEqual(["B0004"])
+    expect(ids(blocks)).toEqual(["B0002", "B0003", "B0004"])
+  })
+
+  it("số lô giảm khi loại section (credit báo theo đúng phần còn lại)", () => {
+    const blocks = Array.from({ length: 20 }, (_, i) => blk(i + 1, i < 10 ? "custom:CS01" : "fixed:3.1", "x".repeat(1_000)))
+    const excluded = excludedCheckSections({ sections: [{ section_id: "custom:CS01", status: "out_of_scope" }] })
+    expect(semanticBatches(blocks, 20_000)).toHaveLength(2)
+    expect(semanticBatches(blocks, 20_000, { excluded_sections: excluded })).toHaveLength(1)
+  })
+
+  it("hai phân tích mục tiêu / KPI chỉ chạy khi tài liệu có mục tiêu", () => {
+    const spine = createEmptySpine()
+    expect(hasGoalSection(spine)).toBe(false)
+    expect(hasGoalSection({ project: { ...spine.project, goals: ["  "] } })).toBe(false)
+    expect(hasGoalSection({ project: { ...spine.project, goals: ["Cut checkout time"] } })).toBe(true)
   })
 })

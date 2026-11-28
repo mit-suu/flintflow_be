@@ -13,15 +13,14 @@ import request from "supertest"
 import app from "../../../src/app.js"
 import { authAs, seedFixture, type SeededFixture } from "../../setup.js"
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
-import { createMode1Project, fakeMode1 } from "../../helpers/mode1.js"
-import { fileOf } from "../../helpers/mode1-import-p4.js"
+import { createMode1Project, fakeMode1, saveTemplateProposal } from "../../helpers/mode1.js"
+import { fileOf, runExtraction } from "../../helpers/mode1-import-p4.js"
 import { p, styled } from "../../../src/modules/docx-ooxml/testing/make-docx.js"
 import { makeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
 import { docFileStore, setDocFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
 import { markReady } from "../../../src/modules/template-migration/template-migration.service.js"
 import { acceptLatest, uploadImport } from "../../../src/modules/import/import.service.js"
-import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { finalizeImport } from "../../../src/modules/import/finalize.service.js"
 import { OrgTemplate, OrgTemplateVersion } from "../../../src/modules/import/org-library.model.js"
 import { Membership, type OrgRole } from "../../../src/modules/organization/membership.model.js"
@@ -82,7 +81,7 @@ const migrationUrl = (projectId: string, id: string, suffix = "") => `${startUrl
 /** Chọn lựa chọn an toàn (không cần AI) cho mọi mục bắt buộc còn thiếu quyết định. */
 const decideAll = async (token: string, projectId: string, dto: MigrationDto) => {
   const items = [...dto.groups.extra, ...dto.groups.conflict]
-  const decisions = dto.undecided.map((id) => {
+  const decisions = [...dto.groups.extra, ...dto.groups.conflict].map((i) => i.id).map((id) => {
     const item = items.find((i) => i.id === id)!
     const choice = item.choices.find((c) => !item.ai_choices.includes(c) && !c.startsWith("move_to:")) ?? item.choices[0]
     return { id, choice }
@@ -166,10 +165,17 @@ describe("đổi mẫu — chuẩn bị", () => {
     // Sửa cặp: id ngoài dữ liệu đã lưu ⇒ 400, không đổi gì
     expect((await patch("/pairs", { pairs: [{ old_key: "custom:khong-co", new_key: null }] })).status).toBe(400)
     expect((await patch("/pairs", { pairs: [{ old_key: dto.pairing.pairs[0].old_key, new_key: "n999" }] })).status).toBe(400)
-    // Chưa qua bước rà mapping ⇒ chưa nhận quyết định
-    const early = await patch("/decisions", { decisions: [{ id: dto.groups.extra[0].id, choice: "delete" }] })
-    expect(early.status).toBe(409)
-    expect(early.body.error.code).toBe("TEMPLATE_MIGRATION_INVALID_STATE")
+    // Ghép cặp và quyết định chung một màn: quyết định nhận ngay ở bước rà ghép, không đổi trạng thái
+    // FLF-466: nhóm Thừa không còn lựa chọn xoá
+    expect((await patch("/decisions", { decisions: [{ id: dto.groups.extra[0].id, choice: "delete" }] })).status).toBe(400)
+    const early = await patch("/decisions", { decisions: [{ id: dto.groups.extra[0].id, choice: "drop_from_print" }] })
+    expect(early.status, JSON.stringify(early.body.error)).toBe(200)
+    expect(early.body.data).toMatchObject({ state: "mapping_review", decisions: [{ id: dto.groups.extra[0].id, choice: "drop_from_print" }] })
+    // Mọi mục thừa / conflict có lựa chọn chọn sẵn miễn phí, không bao giờ là AI
+    for (const item of [...dto.groups.extra, ...dto.groups.conflict]) {
+      expect(item.suggested, item.id).toBeTruthy()
+      expect(item.ai_choices).not.toContain(item.suggested)
+    }
 
     // Ghép tay: bỏ cặp của một mục khớp ⇒ mục đó thành thừa
     const victim = dto.groups.matched.find((m) => m.old_key === "fixed:1")!
@@ -178,6 +184,17 @@ describe("đổi mẫu — chuẩn bị", () => {
     expect((unpaired.body.data as MigrationDto).groups.extra.map((e) => e.old_key)).toContain(victim.old_key)
 
     expect((await request(app).post(url("/confirm-mapping")).set(H(lead.token))).body.data.state).toBe("decisions")
+    const suggestedOnly = (await request(app).get(url()).set(H(lead.token))).body.data as MigrationDto
+    // Chỉ dòng đoán (chuyển vào mục tên gần giống, cùng nhóm cha, đang trống) còn chờ xác nhận
+    const allItems = [...suggestedOnly.groups.extra, ...suggestedOnly.groups.conflict]
+    for (const id of suggestedOnly.undecided) expect(allItems.find((i) => i.id === id)?.confidence, id).toBe("guess")
+    // Lần đổi mẫu mở từ trước khi có gợi ý (mục không mang suggested) vẫn chạy theo luồng cũ: phải quyết từng mục mới ready
+    const stored = (await TemplateMigration.findById(dto.id))!
+    const strip = <T extends object>(i: T): T => Object.fromEntries(Object.entries(i).filter(([k]) => !["suggested", "suggested_reason", "confidence"].includes(k))) as T
+    stored.groups = { ...stored.groups, extra: stored.groups.extra.map(strip), conflict: stored.groups.conflict.map(strip) }
+    stored.decisions = []
+    stored.markModified("groups")
+    await stored.save()
     const current = (await request(app).get(url()).set(H(lead.token))).body.data as MigrationDto
     expect(current.undecided.length).toBeGreaterThan(0)
 
@@ -294,6 +311,7 @@ describe("đổi mẫu — chuẩn bị", () => {
   it("E. đổi ngược: đích = mẫu trước của lần đổi gần nhất ⇒ nhóm đã sửa sau lần đổi mẫu; Giữ hết / Hoàn tác hết", async () => {
     const lead = await seedFixture("minimal", { balance: 1000 })
     const projectId = await baselinedProject(lead, await makeSrsDocx())
+    await saveTemplateProposal(lead.token, projectId)
     const before = (await Project.findById(projectId).lean())!.template_ref!
     const templateId = await publishTemplate(lead, lead.orgId, "Mẫu mới", await makeSrsDocx({ extraBody: EXTRA }))
 
@@ -330,7 +348,12 @@ describe("đổi mẫu — chuẩn bị", () => {
     expect((await request(app).patch(url("/decisions")).set(H(lead.token)).send({ decisions: [{ id: "s:fixed:1", choice: "delete" }] })).status).toBe(400)
 
     // Sửa thêm giữa lúc chuẩn bị ⇒ danh sách mục đã sửa không còn đúng ⇒ không ready
-    expect((await decideAll(lead.token, projectId, keep.body.data)).status).toBe(200)
+    // FLF-466: mẫu lưu từ dự án giữ đủ heading ⇒ đổi ngược không còn mục thừa / xung đột để quyết định
+    const pending = keep.body.data as MigrationDto
+    if (pending.groups.extra.length + pending.groups.conflict.length) {
+      const dec = await decideAll(lead.token, projectId, pending)
+      expect(dec.status, JSON.stringify(dec.body.error)).toBe(200)
+    }
     await Change.create({ projectId, seq: seqNow + 1, txn: "cr-edit-2", op: "set", path: "project.vision", before: "a", value: "b", reason: "sửa", at: new Date(appliedAt.getTime() + 10_000), by: lead.userId, step_id: null })
     spineRepository.clearReadCache()
     const stale = await request(app).post(url("/ready")).set(H(lead.token))
@@ -437,5 +460,21 @@ describe("đổi mẫu — chuẩn bị", () => {
       spy.mockRestore()
     }
     expect((await TemplateMigration.findById(dto.id).lean())!.state).toBe("decisions")
+  })
+
+  it("H. FLF-466: đích là mẫu chuẩn FlintFlow ⇒ bắt đầu được, `to.standard` true, không có template_id; mẫu không có file ⇒ không lộ chữ FPT", async () => {
+    const lead = await seedFixture("minimal", { balance: 1000 })
+    const projectId = await baselinedProject(lead, await makeSrsDocx({ extraBody: LEGACY }))
+    const started = await startWith(lead.token, projectId, { kind: "standard", language: "en" })
+    expect(started.status, JSON.stringify(started.body.error)).toBe(201)
+    const dto = started.body.data as MigrationDto & { to: { standard: boolean; template_id: string | null; name: string } }
+    expect(dto.to).toMatchObject({ standard: true, template_id: null })
+    expect(dto.to.name).not.toMatch(/FPT/i)
+    // FLF-466 P09: chuẩn tiếng Việt dùng nhãn tiếng Việt; loại không phải chuẩn ⇒ 400
+    await request(app).post(migrationUrl(projectId, dto.id, "/cancel")).set(H(lead.token))
+    const viStd = await startWith(lead.token, projectId, { kind: "standard", language: "vi" })
+    expect(viStd.status, JSON.stringify(viStd.body.error)).toBe(201)
+    expect((viStd.body.data as MigrationDto).to).toMatchObject({ standard: true, language: "vi" })
+    expect((await startWith(lead.token, projectId, { kind: "standard", language: "zz" })).status).toBe(400)
   })
 })

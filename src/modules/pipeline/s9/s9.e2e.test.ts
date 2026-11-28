@@ -149,6 +149,7 @@ vi.mock("../../spine/spine.model.js", () => ({ Spine: db.Spine }))
 vi.mock("../../spine/change.model.js", () => ({ Change: db.Change }))
 vi.mock("../../spine/usage.model.js", () => ({ Usage: db.Usage }))
 vi.mock("../../spine/baseline.model.js", () => ({ Baseline: db.Baseline }))
+vi.mock("../../import/layout-preview.service.js", () => ({ assertLayoutConfirmedForBaseline: async () => undefined }))
 vi.mock("../../project/chat-session.model.js", () => ({ ChatSession: db.ChatSession }))
 vi.mock("../../../shared/ai/document-context.service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../shared/ai/document-context.service.js")>()
@@ -205,10 +206,19 @@ const collect = () => {
   return { events, emit: (e: StepEvent) => void events.push(stepEventSchema.parse(e)) }
 }
 
-const reviewExecutor = vi.fn(async () => {
+const reviewExecutor = vi.fn(async (input?: { promptVariables?: Record<string, any> }) => {
+  // FLF-449 việc 5: S-9.2 gọi model theo lô — lô có khối chung thì trả một cờ `ambiguity` trích đúng tên dự án
+  const vars = input?.promptVariables ?? {}
+  const projectName = (vars.projection as { common?: { project?: { name?: string } } } | undefined)?.common?.project?.name
+  const flags: ReviewOutput["flags"] =
+    vars.step_id === "S-9.2"
+      ? projectName
+        ? [{ level: "yellow", rule_id: "ambiguity", section_id: "fixed:1", quote: projectName, message: `Project name "${projectName}" is vague.` }]
+        : []
+      : [{ level: "yellow", rule_id: "goal_not_covered", section_id: "fixed:1", message: "Goal 2 has no use case behind it." }]
   const result: AiActionResult<ReviewOutput> = {
     success: true,
-    data: { flags: [{ level: "yellow", rule_id: "goal_not_covered", section_id: "fixed:1", message: "Goal 2 has no use case behind it." }] },
+    data: { flags },
     rawText: "{}",
     actionType: "review" as never,
     provider: "mock",
@@ -261,6 +271,45 @@ beforeEach(() => {
   reviewExecutor.mockClear()
 })
 
+describe("FLF-449 việc 6: S-8.4 Rà nhất quán bằng AI (mock provider)", () => {
+  const consistencyExecutor = vi.fn(async (input: { promptVariables?: Record<string, any> }) => {
+    const actorName = (input.promptVariables?.projection as { common?: { actors?: { name: string }[] } } | undefined)?.common?.actors?.[0]?.name
+    const flags: ReviewOutput["flags"] = actorName
+      ? [{ level: "yellow", rule_id: "term_drift", section_id: "fixed:2.1", quote: actorName, message: `The actor "${actorName}" is called by another name in the prose.` }]
+      : []
+    return {
+      success: true,
+      data: { flags },
+      rawText: "{}",
+      actionType: "consistency_pass" as never,
+      provider: "mock",
+      aiModel: "mock",
+      tokensUsed: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      latencyMs: 1,
+      logId: "consistency",
+      cost: 1
+    } satisfies AiActionResult<ReviewOutput>
+  })
+
+  it("chạy S-8.4 ⇒ consistencyExecutor được gọi, mở cờ ai_review lens term_drift, gate có câu nói về cờ, không có lượt review từng step", async () => {
+    consistencyExecutor.mockClear()
+    seed()
+    // acceptedBeforeS9 đánh dấu mọi bước trước S-9.1 accepted — đưa S-8.4 về chờ chạy
+    db.spines[0].steps = (db.spines[0].steps as { id: string }[]).filter((s) => s.id !== "S-8.4")
+    const { events, emit } = collect()
+    await runStep(PROJECT, "S-8.4", SESSION, USER, emit, { ...deps(), consistencyExecutor, replyLanguage: "vi" })
+
+    expect(consistencyExecutor).toHaveBeenCalled()
+    expect(reviewExecutor, "không còn lớp review từng step").not.toHaveBeenCalled()
+    const flag = (await repo.get(PROJECT))!.flags.find((f) => f.rule_id === "ai_review")
+    expect(flag).toMatchObject({ level: "yellow", lens: "term_drift", remediation_step: "S-8.4", resolved_at: null })
+    const gateEvent = events.find((e) => e.type === "gate_ready") as { message_vi?: string } | undefined
+    expect(gateEvent?.message_vi).toContain("Rà nhất quán mở 1 cờ vàng")
+    expect(gateEvent?.message_vi).not.toMatch(/term_drift|ai_review|S-8\.4/)
+    expect(db.usages.filter((u) => u.step_id === "S-8.4").length).toBeGreaterThan(0)
+  })
+})
+
 describe("T19: S-9.1 → S-9.5 rồi ký baseline (mock provider)", () => {
   it("đi trọn pha, xếp hạng mọi requirement, mở cờ vàng goal_not_covered, ký ra v1.0", async () => {
     seed()
@@ -281,6 +330,18 @@ describe("T19: S-9.1 → S-9.5 rồi ký baseline (mock provider)", () => {
     expect(signed.steps.find((s) => s.id === "S-9.5")?.status).toBe("accepted")
   })
 
+  it("FLF-449: S-9.2 gọi reviewExecutor ≥ 1 lần và mở cờ vàng ai_review khi executor trả cờ hợp lệ; không cờ đỏ", async () => {
+    seed()
+    await walkS9()
+
+    const s92Calls = reviewExecutor.mock.calls.filter(([input]) => (input as { promptVariables: { step_id: string } }).promptVariables.step_id === "S-9.2")
+    expect(s92Calls.length).toBeGreaterThanOrEqual(1)
+    const flag = (await repo.get(PROJECT))!.flags.find((f) => f.rule_id === "ai_review")
+    expect(flag, "S-9.2 mở cờ ai_review").toBeTruthy()
+    expect(flag).toMatchObject({ level: "yellow", lens: "ambiguity", remediation_step: "S-9.2", resolved_at: null })
+    expect((await repo.get(PROJECT))!.baselines, "cờ ai_review không chặn ký baseline").toHaveLength(1)
+  })
+
   it("cờ vàng goal_not_covered không chặn ký, và không bị lượt quét sau tự đóng", async () => {
     seed()
     await walkS9()
@@ -294,13 +355,14 @@ describe("T19: S-9.1 → S-9.5 rồi ký baseline (mock provider)", () => {
     expect(after.resolved_at, "MODEL_OWNED_RULES giữ cờ qua recompute").toBeNull()
   })
 
-  it("S-9.1 và S-9.5 không tiêu lượt gọi model; S-9.3/S-9.4 thì có", async () => {
+  it("S-9.1 và S-9.5 không tiêu lượt gọi model; S-9.2/S-9.3/S-9.4 thì có (FLF-449: S-9.2 nay gọi model theo lô)", async () => {
     seed()
     await walkS9()
 
     const byStep = (stepId: string) => db.usages.filter((u) => u.step_id === stepId)
     expect(byStep("S-9.1"), "S-9.1 không Meter").toHaveLength(0)
     expect(byStep("S-9.5"), "S-9.5 không Meter").toHaveLength(0)
+    expect(byStep("S-9.2").length, "S-9.2 có gọi model").toBeGreaterThan(0)
     expect(byStep("S-9.3").length, "S-9.3 có gọi model").toBeGreaterThan(0)
     expect(byStep("S-9.4").length, "S-9.4 có gọi model").toBeGreaterThan(0)
   })

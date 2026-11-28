@@ -17,6 +17,8 @@
  * compile-time bắt hai bên lệch nhau.
  */
 
+import type { ScreenPlatform } from "../../shared/diagram/screen-theme.js"
+
 /** Chuỗi ISO 8601, ví dụ "2026-09-14T08:00:00.000Z". */
 export type IsoDateTime = string
 
@@ -62,12 +64,31 @@ export interface SpineProject {
   release_scope: ReleaseScope
 }
 
+/** Phạm vi báo credit cần user xác nhận trước khi chạy tiếp (FLF-466 P08, business-flow §2 "Báo trước khi chạy hàng loạt"). */
+export type CreditAckScope = "after_brief" | "screens_locked" | "screens_added" | "reference_documents"
+
+/** Thông báo credit đang chờ xác nhận — server chặn step thuộc phạm vi tới khi `POST /run-estimate/ack`. */
+export interface CreditAckRequired {
+  scope: CreditAckScope
+  /** Credit đã báo (chính xác phần step cố định / phần màn; `after_brief` không gồm phần ước tính màn). */
+  credits: number
+  created_at: string
+  /** Màn thuộc lần báo (`screens_locked`, `screens_added`). */
+  screens?: string[]
+  /** FLF-458: `reference_documents` — số tài liệu tham khảo chờ đọc đã báo. */
+  documents?: number
+}
+
 export interface Progress {
   current_phase: string | null
   current_step: string | null
   screen_cursor: string | null
   screen_queue: string[]
   elicit_turns_this_phase: number
+  /** FLF-466 P08: có ⇒ step thuộc phạm vi bị chặn 409 `CREDIT_ACK_REQUIRED` tới khi user xác nhận. Dự án cũ không có field. */
+  credit_ack_required?: CreditAckRequired | null
+  /** FLF-466 P08: màn đã được báo + xác nhận credit; màn mới ngoài danh sách (sau S-4.1) ⇒ báo lại `screens_added`. Thiếu ⇒ dự án cũ, không bắt. */
+  credit_acked_screens?: string[]
 }
 
 /** `skipped` (FLF-182): step không áp dụng cho template của project mode 1 — bị ẩn, không tính tiến độ. */
@@ -106,6 +127,11 @@ export interface Actor {
    * Chỉ actor người ↔ actor người. Use case dùng chung đặt ở actor cha; actor con thừa kế.
    */
   parent_id?: string | null
+  /**
+   * FLF-493: nền tảng actor người dùng hệ thống (`web` = máy tính / máy tính bảng, `mobile` = app điện thoại), tập con của
+   * nền tảng dự án. Chỉ có nghĩa với `kind = human`; vắng ⇒ chưa biết (mockup vẽ theo theme dự án).
+   */
+  platforms?: ScreenPlatform[]
 }
 
 export interface Role {
@@ -293,6 +319,8 @@ export interface Function {
   component_interactions?: ComponentInteraction[]
   /** FLF-365: bản phát hành của yêu cầu (phân bổ yêu cầu, "1.0"; "deferred" = hoãn). Thiếu = chưa phân bổ. */
   release?: string | null
+  /** Nguồn của yêu cầu do AI soạn (tài liệu, đoạn hoặc người yêu cầu). Thiếu = chưa ghi nguồn. */
+  source_ref?: string | null
 }
 export type SpineFunction = Function
 
@@ -309,6 +337,7 @@ export interface Nfr {
   priority: Priority | null
   /** FLF-365: như `Function.release`. */
   release?: string | null
+  source_ref?: string | null
 }
 
 export type BusinessRuleTier = "high" | "detail"
@@ -318,6 +347,7 @@ export interface BusinessRule {
   tier: BusinessRuleTier
   statement: string
   source_validation_ids: string[]
+  source_ref?: string | null
 }
 
 export interface CommonRequirement {
@@ -347,6 +377,8 @@ export interface OtherRequirement {
   statement: string
   /** Câu bằng ngôn ngữ user (FLF-237); dữ liệu cũ không có. */
   statement_vi?: string | null
+  /** FLF-449: câu nguyên văn trong Brief / tài liệu làm nảy ra mục này (chỗ thiếu của Brief). Không in vào SRS; dữ liệu cũ không có. */
+  source_quote?: string | null
 }
 
 export interface GlossaryTerm {
@@ -525,6 +557,8 @@ export interface Flag {
   section_id: string
   /** Tài liệu ghi `target_id?` và "nullable" — chấp nhận cả hai. */
   target_id?: string | null
+  /** FLF-449: tên lens của cờ AI (`rule_id = "ai_review"`); null / thiếu với mọi cờ khác. */
+  lens?: string | null
   message: string
   remediation_step: string
   opened_at_version: number

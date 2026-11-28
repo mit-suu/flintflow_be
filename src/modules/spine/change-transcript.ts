@@ -18,6 +18,7 @@ import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language
 import type { ChangePreviewResult } from "./change.service.js"
 import type { Spine } from "./spine.types.js"
 import { buildConversationSummary, type TranscriptMessage } from "../pipeline/conversation-summary.js"
+import type { CrPrefill } from "../import/mode1-guard.js"
 
 /** `buildConversationSummary` trả chuỗi này khi chưa có gì để tóm tắt. */
 const EMPTY_SUMMARY = "(chưa có gì)"
@@ -62,6 +63,20 @@ export const formatChatContext = (
   return history ? `Tóm tắt hội thoại trước: ${summary}\n\n${history}` : `Tóm tắt hội thoại trước: ${summary}`
 }
 
+/**
+ * Tin "đã áp dụng" của bản sửa một phần (lệnh nhiều ý còn một câu hỏi chờ trả lời): không khép yêu cầu đang hỏi dở, nên
+ * `clarificationRounds` / `pendingChangeRequest` đi qua nó để câu trả lời kế tiếp vẫn nối với yêu cầu gốc.
+ */
+const keepsRequestOpen = (msg: IChatMessage): boolean => {
+  if (msg.role !== "ai" || !msg.content.startsWith("{")) return false
+  try {
+    const data = JSON.parse(msg.content) as { kind?: unknown; request_open?: unknown }
+    return data.kind === "change_applied" && data.request_open === true
+  } catch {
+    return false
+  }
+}
+
 const messageKind = (msg: IChatMessage): string | null => {
   if (msg.role !== "ai" || !msg.content.startsWith("{")) return null
   try {
@@ -81,6 +96,7 @@ export const clarificationRounds = (messages: readonly IChatMessage[]): number =
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
     if (msg.role === "user") continue
+    if (keepsRequestOpen(msg)) continue
     if (messageKind(msg) !== "change_clarification") break
     rounds++
   }
@@ -101,6 +117,7 @@ export const pendingChangeRequest = (messages: readonly IChatMessage[]): { reque
       request = msg.content
       continue
     }
+    if (keepsRequestOpen(msg)) continue
     if (messageKind(msg) !== "change_clarification") break
     question ??= messageText(msg)
     request = null
@@ -126,16 +143,61 @@ export const loadProjectSession = async (projectId: string, sessionId: string): 
 export const previewPayload = (
   preview: ChangePreviewResult,
   language: ReplyLanguage = "vi",
-  /** FLF-318: dự án sau baseline (mode 1, `meta.requires_cr`) — bản xem trước để tạo change request, không áp thẳng. */
-  opts: { requiresCr?: boolean } = {}
+  opts: {
+    /** FLF-318: dự án sau baseline (mode 1, `meta.requires_cr`) — bản xem trước để tạo change request, không áp thẳng. */
+    requiresCr?: boolean
+    /**
+     * FLF-473 (B5): lưới an toàn — model không ra được lô hợp lệ ở dự án import sau baseline ⇒ nội dung điền sẵn cho
+     * thẻ "Mở change request" (luồng CR định vị được cả đoạn văn nối, chat thường không). `null` ⇒ không mời.
+     */
+    crPrefill?: CrPrefill | null
+  } = {}
 ): Record<string, unknown> =>
-  preview.clarification
+  preview.auto_applied
+    ? {
+        // Mức duyệt cho phép tự ghi: tin vào phiên như một lượt đã áp, FE hiện nút hoàn tác
+        kind: "change_applied",
+        reply: [
+          byLanguage(language, {
+            vi: `Đã tự áp dụng ${preview.changes.length} thay đổi vào tài liệu theo mức duyệt của bạn - chưa ưng thì hoàn tác ngay được.`,
+            en: `Applied ${preview.changes.length} change${preview.changes.length === 1 ? "" : "s"} to the document automatically, per your review level - undo right away if it is not what you wanted.`
+          }),
+          preview.notes
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        count: preview.changes.length,
+        spine_version: preview.applied_version ?? null,
+        auto_applied: true
+      }
+    : preview.clarification
     ? {
         kind: "change_clarification",
-        reply: preview.clarification,
+        reply: opts.crPrefill
+          ? byLanguage(language, {
+              vi: `Mình chưa xác định được cần đổi gì theo đúng mục trong tài liệu. Bấm "Mở change request" để gửi yêu cầu này cho luồng xử lý đầy đủ - luồng đó định vị được cả đoạn văn xuôi, không chỉ các mục có cấu trúc.`,
+              en: `I couldn't pin down the exact section to change in the document. Press "Mở change request" (Open change request) to send this - that flow can locate prose paragraphs too, not just structured sections.`
+            })
+          : [
+          preview.clarification,
+          // Lệnh nhiều ý: phần rõ đã có bản xem trước đi kèm câu hỏi này
+          preview.ok && preview.changes.length > 0
+            ? byLanguage(language, {
+                vi: `Phần đã rõ mình dựng sẵn ${preview.changes.length} thay đổi ở bản xem trước - bạn trả lời câu này để mình làm nốt phần còn lại.`,
+                en: `I built a preview of ${preview.changes.length} change${preview.changes.length === 1 ? "" : "s"} for the clear part - answer this and I will do the rest.`
+              })
+            : null,
+          preview.ok ? preview.notes : null
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        ...(preview.ok && preview.preview_id ? { preview_id: preview.preview_id, branch: preview.branch ?? null, change_count: preview.changes.length } : {}),
+        ...(opts.crPrefill ? { cr_prefill: opts.crPrefill } : {}),
         // FLF-311: câu có lựa chọn (màn riêng / popup) ⇒ FE hiện thẻ chọn nhanh; chọn xong đi tiếp lệnh sửa
+        // P08 #1 (FLF-480): trước đây `question` luôn cố định "Chọn giao diện" / "Choose the UI" dù câu hỏi không
+        // về giao diện — đổi thành chính câu `preview.clarification` (đã đúng ngôn ngữ từ change.service).
         ...(preview.clarification_choices?.length
-          ? { questions: [{ question: byLanguage(language, { vi: "Chọn giao diện", en: "Choose the UI" }), options: preview.clarification_choices.map((label) => ({ label })) }] }
+          ? { questions: [{ question: preview.clarification, options: preview.clarification_choices.map((label) => ({ label })) }] }
           : {})
       }
     : {
@@ -152,6 +214,10 @@ export const previewPayload = (
                       vi: `Đã dựng bản xem trước ${preview.changes.length} thay đổi - xem rồi bấm Áp dụng để ghi.`,
                       en: `Built a preview of ${preview.changes.length} change${preview.changes.length === 1 ? "" : "s"} - review it, then press "Áp dụng" (Apply) to save.`
                     }),
+                // AI cảnh báo yêu cầu không hợp lý: nói thẳng trong chat, người dùng quyết "Vẫn làm" hay bỏ
+                preview.warning
+                  ? `${preview.warning} ${byLanguage(language, { vi: 'Nếu vẫn muốn làm, bấm “Vẫn làm”.', en: 'If you still want it, press "Vẫn làm" (Do it anyway).' })}`
+                  : null,
                 // FLF-298: phần còn thiếu (vd use case mới chưa có màn hình) phải hiện ngay trong chat, không chỉ trong thẻ
                 preview.notes
               ]
@@ -166,7 +232,10 @@ export const previewPayload = (
           : violationMessage(preview.violations),
         preview_id: preview.preview_id ?? null,
         branch: preview.branch ?? null,
-        change_count: preview.changes.length
+        change_count: preview.changes.length,
+        ...(preview.warning ? { warning: preview.warning } : {}),
+        ...(preview.predicted_red_flags?.length ? { predicted_red_count: preview.predicted_red_flags.length } : {}),
+        ...(preview.confirm_reason ? { confirm_reason: preview.confirm_reason } : {})
       }
 
 /**

@@ -74,8 +74,10 @@ router.post("/:projectId/assemble", authMiddleware, renderController.assembleCon
  *     responses:
  *       200:
  *         description: RenderedDocument (render/rendered-document.schema.ts)
+ *       403:
+ *         description: ORG_ROLE_FORBIDDEN (Viewer gọi source=draft)
  *       404:
- *         description: PROJECT_NOT_FOUND, BASELINE_NOT_FOUND
+ *         description: PROJECT_NOT_FOUND, BASELINE_NOT_FOUND, VIEWER_NO_STABLE_VERSION
  *       409:
  *         description: NO_WORKING_DRAFT (project chưa có Spine). source=draft trả 200 + meta.state = "not_assembled"
  */
@@ -120,13 +122,15 @@ router.get("/:projectId/version", authMiddleware, renderController.getVersionCon
  *           enum: [vi, en]
  *     responses:
  *       200:
- *         description: "File .docx, tên `<tên>_v1.0[_EN|_VI].docx` (baseline) · `<tên>_v1.0_DRAFT[_EN|_VI].docx` / `<tên>_DRAFT[_EN|_VI].docx` (bản nháp) — hậu tố ngôn ngữ chỉ khi `lang` khác ngôn ngữ tài liệu (FLF-334 B). Header `X-Document-Language` = ngôn ngữ của file; `source=draft` kèm `X-Assembled-At-Version`, `X-Spine-Version`."
+ *         description: "File .docx, tên `<tên>_<mã>_v1.0[_EN|_VI].docx` (baseline) · `<tên>_<mã>_DRAFT[_EN|_VI].docx` (bản nháp) — hậu tố ngôn ngữ chỉ khi `lang` khác ngôn ngữ tài liệu (FLF-334 B, FLF-466). Header `X-Document-Language` = ngôn ngữ của file; `source=draft` kèm `X-Assembled-At-Version`, `X-Spine-Version`."
  *       401:
  *         description: Chưa xác thực
+ *       403:
+ *         description: ORG_ROLE_FORBIDDEN (Viewer xuất bản nháp)
  *       404:
- *         description: PROJECT_NOT_FOUND, BASELINE_NOT_FOUND
+ *         description: PROJECT_NOT_FOUND, BASELINE_NOT_FOUND, VIEWER_NO_STABLE_VERSION
  *       409:
- *         description: "NO_WORKING_DRAFT (project chưa có Spine) · TRANSLATION_INCOMPLETE (`lang` cần bản dịch mà còn thiếu — meta { locale, missing, total }) · DOCUMENT_LANGUAGE_UNAVAILABLE (dự án mode 1 + `lang` khác ngôn ngữ tài liệu)"
+ *         description: "NO_WORKING_DRAFT (project chưa có Spine) · TRANSLATION_INCOMPLETE (`lang` cần bản dịch mà còn thiếu — meta { locale, missing, total, batches, estimated_credits }) · DOCUMENT_LANGUAGE_UNAVAILABLE (dự án import thật + `lang` khác ngôn ngữ tài liệu ở nguồn khác baseline)"
  *       422:
  *         description: RENDER_IMAGE_INVALID
  */
@@ -172,10 +176,12 @@ router.get("/:projectId/export/word", authMiddleware, exportController.exportWor
  *         description: File .pdf, tên như export/word đổi đuôi `.pdf`. Cùng header với export/word.
  *       401:
  *         description: Chưa xác thực
+ *       403:
+ *         description: ORG_ROLE_FORBIDDEN (Viewer xuất bản nháp)
  *       404:
- *         description: PROJECT_NOT_FOUND, BASELINE_NOT_FOUND
+ *         description: PROJECT_NOT_FOUND, BASELINE_NOT_FOUND, VIEWER_NO_STABLE_VERSION
  *       409:
- *         description: "NO_WORKING_DRAFT (project chưa có Spine) · TRANSLATION_INCOMPLETE (`lang` cần bản dịch mà còn thiếu — meta { locale, missing, total }) · DOCUMENT_LANGUAGE_UNAVAILABLE (dự án mode 1 + `lang` khác ngôn ngữ tài liệu)"
+ *         description: "NO_WORKING_DRAFT (project chưa có Spine) · TRANSLATION_INCOMPLETE (`lang` cần bản dịch mà còn thiếu — meta { locale, missing, total, batches, estimated_credits }) · DOCUMENT_LANGUAGE_UNAVAILABLE (dự án import thật + `lang` khác ngôn ngữ tài liệu ở nguồn khác baseline)"
  *       503:
  *         description: PDF_EXPORT_UNAVAILABLE — Gotenberg không chạy / lỗi / quá hạn; export/word vẫn dùng được
  */
@@ -220,19 +226,15 @@ router.get("/:projectId/export/pdf", authMiddleware, exportController.exportPdf)
  *                 type: string
  *                 enum: [new, update]
  *                 default: update
- *               force:
- *                 type: boolean
- *                 default: false
- *                 description: Ghi đè dù Doc đã bị sửa trong Google Docs sau lần xuất trước
  *     responses:
  *       200:
- *         description: "{ fileId, webViewLink, title, mode, recreated, folder { id, path, url } | null } — file nằm trong thư mục FlintFlow / <dự án>"
+ *         description: "{ fileId, webViewLink, title, mode, recreated }"
  *       401:
  *         description: GOOGLE_RECONNECT_REQUIRED — chưa nối Google hoặc quyền đã bị thu hồi
  *       403:
  *         description: ORG_ROLE_FORBIDDEN (Viewer xuất bản nháp) · GOOGLE_FILE_FORBIDDEN
  *       409:
- *         description: Như export/word (NO_WORKING_DRAFT, TRANSLATION_INCOMPLETE, DOCUMENT_LANGUAGE_UNAVAILABLE) · GOOGLE_DOC_MODIFIED (Doc đã bị sửa sau lần xuất trước, gửi lại với force)
+ *         description: Như export/word (NO_WORKING_DRAFT, TRANSLATION_INCOMPLETE, DOCUMENT_LANGUAGE_UNAVAILABLE)
  *       503:
  *         description: GOOGLE_INTEGRATION_DISABLED · GOOGLE_DRIVE_QUOTA_EXCEEDED
  */

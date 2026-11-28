@@ -42,7 +42,7 @@ const addRedFlag = async (projectId: string) => {
       {
         op: "add",
         path: "diagrams[]",
-        value: { id: "D01", kind: "erd", format: "puml", source: "@startuml\n@enduml", section: "fixed:3.1.5", owner_kind: null, owner_id: null, render_status: "error", error: "boom", source_hash: "x", rendered_at: null }
+        value: { id: "D99", kind: "erd", format: "puml", source: "@startuml\n@enduml", section: "fixed:3.1.5", owner_kind: null, owner_id: null, render_status: "error", error: "boom", source_hash: "x", rendered_at: null }
       }
     ]
   })
@@ -90,6 +90,9 @@ describe("C-7 - gói duyệt kiểu pull request", () => {
     const analyst = await joinOrg(seeded.orgId, "analyst")
     const a = apiAs(seeded, analyst.token, projectId)
     await writeCr(a, "Nhanh hơn", "1 second instead of 2 seconds")
+    // CR còn dở lúc gửi (BE không chặn gửi vì CR mở): sau khi gửi, mọi bước C-1…C-6 của nó cũng bị khoá
+    const open = await a.post("/change-requests", { title: "Còn dở", description: "x", source: { kind: "verbal" }, requester: "PM" })
+    expect(open.status, JSON.stringify(open.body.error)).toBe(201)
 
     const sent = await submitPkg(a)
     expect(sent.status, JSON.stringify(sent.body.error)).toBe(200)
@@ -99,6 +102,9 @@ describe("C-7 - gói duyệt kiểu pull request", () => {
     const blocked = await a.post("/change-requests", { title: "Thêm nữa", description: "x", source: { kind: "verbal" }, requester: "PM" })
     expect(blocked.status).toBe(409)
     expect(blocked.body.error.code).toBe("PACKAGE_PENDING")
+    const step = await a.post(`/change-requests/${open.body.data.change_request.cr_id}/clarify`, {})
+    expect(step.status).toBe(409)
+    expect(step.body.error.code).toBe("PACKAGE_PENDING")
     expect((await submitPkg(a)).body.error.code).toBe("PACKAGE_ALREADY_SUBMITTED")
 
     const [n] = await notificationsOf(seeded.userId, "review_package_submitted", 1)

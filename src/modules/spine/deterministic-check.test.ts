@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { describe, it, expect } from "vitest"
 import { spineSchema } from "./spine.schema.js"
 import type { Change, Spine, StepStatus } from "./spine.types.js"
-import { NON_WAIVABLE_RULES, RULES, checkUseCaseName, isAccountAccessUseCase, runDeterministicCheck, useCaseNameIssues, type FlagCandidate } from "./deterministic-check.js"
+import { NON_WAIVABLE_RULES, RULES, checkTableStructure, checkUseCaseName, isAccountAccessUseCase, runDeterministicCheck, useCaseNameIssues, type FlagCandidate, type RuleProfile } from "./deterministic-check.js"
 import { buildIdIndex, sectionKeyExists } from "./reference-fields.js"
 import { renderedDiagramHash } from "./source-hash.js"
 import { createEmptySpine } from "./spine.repository.js"
@@ -29,15 +29,15 @@ const withSystemNameStep = (s: Spine, status: StepStatus): void => {
 }
 
 describe("RULES", () => {
-  it("14 luật đỏ + 29 luật vàng (FLF-428: screen_no_actor; FLF-418: sequence_component_missing; FLF-278: template_section_absent / _empty; FLF-365: verification_orphan; FLF-366: original_text_mentions_changed; FLF-370: actor_generalization_missing); mọi luật đỏ không waive được (FLF-329)", () => {
-    expect(RULES.filter((r) => r.level === "red")).toHaveLength(14)
+  it("17 luật đỏ + 32 luật vàng (tầng 3 theo luật: duplicate_name, vague_wording, source_missing; tầng 2: content_type_missing; mục mẫu chuẩn thiếu: standard_section_missing; theo flow 18/11: template_section_empty và original_text_mentions_changed đỏ, section_stale_at_baseline và section_awaiting_reaccept vàng; FLF-428: screen_no_actor; FLF-418: sequence_component_missing; FLF-278: template_section_absent / _empty; FLF-365: verification_orphan; FLF-366: original_text_mentions_changed; FLF-370: actor_generalization_missing; FLF-483: actor_no_usecase); mọi luật đỏ không waive được (FLF-329)", () => {
+    expect(RULES.filter((r) => r.level === "red")).toHaveLength(17)
     // FLF-177: thêm screen_placeholder (BUG-03), function_without_uc (BUG-12),
     // derived_from_changed_assumption (BUG-14); mode 1 §4.13: original_diagram_stale;
     // FLF-225: orphan_entity, unresolved_many_to_many (ERD); actor_generalization_invalid, actor_generalization_children_unlisted; screen_actor_ambiguous đã bỏ cùng làn của luồng màn;
     // FLF-370: actor_generalization_missing; FLF-365: verification_orphan; FLF-366: original_text_mentions_changed; đổi mẫu: template_section_migration_missing (đỏ) + section_reference_after_migration (vàng)
     // FLF-418: sequence_component_missing
     // FLF-428: screen_no_actor
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(29)
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(32)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(RULES.filter((r) => r.level === "red").map((r) => r.rule_id).sort())
     expect(RULES.filter((r) => r.level === "yellow").every((r) => r.waivable)).toBe(true)
   })
@@ -437,7 +437,7 @@ describe("runDeterministicCheck", () => {
         s.actors.push({ id: "A99", name: "Auditor", kind: "human", description: "" })
         s.use_cases[0].function_ids = []
         s.features.push({ id: "F7", name: "Empty", order: 6 })
-        s.screens.push({ ...s.screens[1], id: "S99", flow_to: [], primary_function_id: null })
+        s.screens.push({ ...s.screens[1], id: "S99", name: "Unlinked Screen", flow_to: [], primary_function_id: null })
         s.actors[1].description = "Người dùng cuối"
       })
     )
@@ -542,6 +542,41 @@ describe("runDeterministicCheck", () => {
 
     const actorFlags = byRule(runDeterministicCheck(variant((s) => (s.actors[0].name = "User"))), "actor_name_shape")
     expect(actorFlags).toMatchObject([{ target_id: FIXTURE.actors[0].id, level: "yellow", section_id: "fixed:2.1", remediation_step: "S-3.1" }])
+  })
+
+  it("FLF-483 (H1): sau khi thu hẹp phạm vi, actor con không còn use case riêng ⇒ cờ vàng actor_no_usecase; còn use case riêng thì không", () => {
+    const narrowed = variant((s) => {
+      s.actors.push({ id: "A10", name: "User", kind: "human", description: "Any signed-in person: a business ANALYST or an Administrator." })
+      s.actors.find((a) => a.id === "A02")!.parent_id = "A10"
+      s.actors.find((a) => a.id === "A03")!.parent_id = "A10"
+      s.use_cases = s.use_cases.filter((u) => !["UC20", "UC21"].includes(u.id))
+      for (const u of s.use_cases) u.actor_ids = u.actor_ids.filter((a) => a !== "A03")
+      s.use_cases.find((u) => u.id === "UC02")!.actor_ids.push("A10")
+    })
+    const flags = byRule(runDeterministicCheck(narrowed), "actor_no_usecase")
+    expect(flags).toMatchObject([{ target_id: "A03", level: "yellow", section_id: "fixed:2.1", remediation_step: "S-3.2" }])
+    expect(flags[0].message).toContain(FIXTURE.actors.find((a) => a.id === "A03")!.name)
+    // A02 vẫn còn use case riêng, A10 là tác nhân tổng quát có use case riêng ⇒ không cờ
+    expect(flags.map((f) => f.target_id)).not.toContain("A02")
+    expect(flags.map((f) => f.target_id)).not.toContain("A10")
+    // actor không thuộc use case nào và không có cha vẫn là orphan_actor, không nhân đôi cờ
+    expect(byRule(runDeterministicCheck(narrowed), "orphan_actor").map((f) => f.target_id)).not.toContain("A03")
+  })
+
+  it("FLF-483 (H1): vai trò công khai Guest không gắn tác nhân không bị cờ; vai trò khác không gắn tác nhân vẫn bị", () => {
+    const flags = byRule(
+      runDeterministicCheck(
+        variant((s) => {
+          s.roles[0].actor_id = null
+          s.roles[0].name = "Guest"
+          s.roles[1].actor_id = null
+          s.roles[1].name = "Auditor"
+          s.roles.push({ id: "R98", name: "Khách", actor_id: null }, { id: "R99", name: "Khách hàng", actor_id: null })
+        })
+      ),
+      "role_no_actor"
+    )
+    expect(flags.map((f) => f.target_id).sort()).toEqual([FIXTURE.roles[1].id, "R99"].sort())
   })
 
   it("generalization: actor cha tên User được miễn A2, actor con thừa kế use case, parent_id sai ⇒ cờ vàng", () => {
@@ -987,6 +1022,37 @@ describe("chế độ 3 - mẫu bắt buộc (FLF-278 trên FLF-335/336)", () =>
     expect(filled.filter((f) => f.rule_id === "template_section_empty").map((f) => f.section_id)).toEqual(["custom:CS01"])
   })
 
+  it("FLF-455: mục riêng Ngoài phạm vi không bị template_section_empty / original_text_mentions_changed; mục trống trong phạm vi vẫn bị; nhãn tay in_scope (không còn trong tập) lại bị kiểm", async () => {
+    const { readFileSync } = await import("node:fs")
+    const base = JSON.parse(readFileSync(new URL("../../../fixtures/spine-fixture-19-screens.json", import.meta.url), "utf8"))
+    const block = (text: string) => ({ kind: "paragraph" as const, text, rows: null, image_ref: null })
+    const uc = base.use_cases[0]
+    const spine = {
+      ...base,
+      use_cases: base.use_cases.map((u: { id: string }) => (u.id === uc.id ? { ...u, name: "Tên mới" } : u)),
+      custom_sections: [
+        { id: "CS01", heading: "Dự toán chi phí", level: 2, blocks: [], source: "import" },
+        { id: "CS02", heading: "Rủi ro", level: 2, blocks: [], source: "import" },
+        { id: "CS03", heading: "Ghi chú", level: 2, blocks: [block(`Xem ${uc.name}`)], source: "import" }
+      ]
+    }
+    const segments = [
+      { section_id: "custom:CS03", parts: [{ kind: "original", custom_id: "CS03", diagrams: [], mentions: [{ path: `use_cases[id=${uc.id}]`, array: "use_cases", id: uc.id, name: uc.name }] }], known: [] }
+    ] as never
+    const profile = (outOfScope?: string[]) => ({
+      ruleProfile: { exclude: new Set<string>(), downgrade: new Set<string>(), templateLayout: new Set(["custom:CS01", "custom:CS02", "custom:CS03"]), sectionSegments: segments, ...(outOfScope ? { outOfScope: new Set(outOfScope) } : {}) }
+    })
+    const sections = (rule: string, o?: string[]) => byRule(runDeterministicCheck(spine, [], profile(o)), rule).map((f) => f.section_id)
+    // Không có Ngoài phạm vi ⇒ như cũ (đủ hai cờ đỏ)
+    expect(sections("template_section_empty")).toEqual(["custom:CS01", "custom:CS02"])
+    expect(sections("original_text_mentions_changed")).toEqual(["custom:CS03"])
+    // CS01 và CS03 Ngoài phạm vi ⇒ không bắn; CS02 trống trong phạm vi vẫn bắn
+    expect(sections("template_section_empty", ["custom:CS01", "custom:CS03"])).toEqual(["custom:CS02"])
+    expect(sections("original_text_mentions_changed", ["custom:CS01", "custom:CS03"])).toEqual([])
+    // Nhãn tay in_scope: mục rời tập Ngoài phạm vi ⇒ bị kiểm lại
+    expect(sections("template_section_empty", ["custom:CS03"])).toEqual(["custom:CS01", "custom:CS02"])
+  })
+
   it("mẫu cố định không có chỗ in sơ đồ (Use Case Diagram) ⇒ sơ đồ vẽ lỗi / cũ không thành cờ chặn release", () => {
     const d = FIXTURE.diagrams.find((x) => x.kind === "usecase")!
     const errored = variant((s) => Object.assign(s.diagrams.find((x) => x.id === d.id)!, { render_status: "error", error: "syntax" }))
@@ -1011,5 +1077,233 @@ describe("FLF-365 - verification_orphan", () => {
     expect(flags.map((f) => [f.level, f.section_id, f.target_id])).toEqual([["yellow", "slot:verification", "VER-02"]])
     expect(flags[0].message).toContain('"FR-99"')
     expect(RULES.find((r) => r.rule_id === "verification_orphan")).toBeDefined()
+  })
+})
+
+describe("tầng 3 theo luật: duplicate_name", () => {
+  it("hai actor / use case / màn trùng tên ⇒ cờ đỏ không waive, mỗi phần tử một cờ; không còn lặp thành cờ vàng U8 / A7", () => {
+    const flags = runDeterministicCheck(
+      variant((s) => {
+        s.actors.push({ ...s.actors[0], id: "A98" })
+        s.use_cases.push({ ...s.use_cases[0], id: "UC98" })
+        s.screens.push({ ...s.screens[0], id: "S98" })
+      })
+    )
+    const dup = byRule(flags, "duplicate_name")
+    expect(dup.every((f) => f.level === "red")).toBe(true)
+    expect(NON_WAIVABLE_RULES.has("duplicate_name")).toBe(true)
+    expect(dup.map((f) => f.target_id).sort()).toEqual([FIXTURE.actors[0].id, "A98", FIXTURE.use_cases[0].id, "UC98", FIXTURE.screens[0].id, "S98"].sort())
+    expect(dup.find((f) => f.target_id === "A98")?.section_id).toBe("fixed:2.1")
+    expect(flags.some((f) => f.rule_id === "actor_name_shape" && f.message.includes("trùng"))).toBe(false)
+    expect(byRule(flags, "usecase_name_semantic").some((f) => f.message.includes("trùng"))).toBe(false)
+  })
+
+  it("hai phần tử trùng mã (Spine nhập từ file) cũng là cờ đỏ; tên khác nhau thì không cờ", () => {
+    const flags = runDeterministicCheck(variant((s) => s.actors.push({ ...s.actors[0], name: "Other Name" })))
+    expect(byRule(flags, "duplicate_name").map((f) => f.target_id)).toEqual([FIXTURE.actors[0].id])
+    expect(byRule(flags, "duplicate_name")[0].message).toContain("mỗi phần tử cần một mã riêng")
+    expect(byRule(runDeterministicCheck(FIXTURE), "duplicate_name")).toEqual([])
+  })
+
+  it("chế độ 1 vẫn chạy luật", () => {
+    const flags = runDeterministicCheck(variant((s) => s.actors.push({ ...s.actors[0], id: "A98" })), [], { ruleProfile: MODE1_RULE_PROFILE })
+    expect(byRule(flags, "duplicate_name")).toHaveLength(2)
+  })
+})
+
+describe("tầng 3 theo luật: vague_wording", () => {
+  const withText = (fn: (s: Spine) => void) => byRule(runDeterministicCheck(variant(fn), [], { ruleProfile: MODE1_RULE_PROFILE }), "vague_wording")
+
+  it("từ mơ hồ tiếng Anh trong chức năng / NFR / quy tắc ⇒ đỏ, nêu từ và đúng phần tử", () => {
+    const flags = withText((s) => {
+      s.functions[0].description = "The system must respond fast and be user-friendly."
+      s.nfrs[0].statement = "Pages load as soon as possible"
+      s.business_rules[0].statement = "Refunds are handled quickly, etc."
+    })
+    expect(flags.map((f) => f.target_id).sort()).toEqual([FIXTURE.functions[0].id, FIXTURE.nfrs[0].id, FIXTURE.business_rules[0].id].sort())
+    expect(flags.every((f) => f.level === "red")).toBe(true)
+    expect(flags.find((f) => f.target_id === FIXTURE.functions[0].id)?.message).toContain('"fast"')
+    expect(flags.find((f) => f.target_id === FIXTURE.functions[0].id)?.message).toContain('"user-friendly"')
+    expect(NON_WAIVABLE_RULES.has("vague_wording")).toBe(true)
+  })
+
+  it("từ mơ hồ tiếng Việt (dấu dựng sẵn hay rời) và áp ở chế độ 1", () => {
+    const flags = withText((s) => {
+      s.functions[0].description = "Hệ thống phản hồi nhanh chóng, giao diện thân thiện."
+      s.nfrs[0].statement = `He thong ${"hiệu quả".normalize("NFD")}`
+    })
+    expect(flags).toHaveLength(2)
+    expect(flags.find((f) => f.target_id === FIXTURE.functions[0].id)?.message).toContain('"thân thiện"')
+  })
+
+  it("ranh giới từ: 'fastidious', 'uneasy', tên chế độ viết hoa giữa câu, từ trong ngoặc kép không bị cờ", () => {
+    const flags = withText((s) => {
+      s.functions[0].description = "A fastidious reviewer is uneasy about it."
+      s.functions[1].description = "User picks Fast or Coaching mode."
+      s.functions[2].description = 'Working mode is one of "fast" or "coaching".'
+    })
+    expect(flags).toEqual([])
+    // viết hoa đầu câu vẫn là tính từ mô tả
+    expect(withText((s) => (s.functions[0].description = "Fast response is required."))).toHaveLength(1)
+  })
+
+  it("chức năng hoãn (release = deferred) không bị soi", () => {
+    expect(withText((s) => Object.assign(s.functions[0], { description: "must be fast", release: "deferred" }))).toEqual([])
+  })
+})
+
+describe("tầng 3 theo luật: source_missing", () => {
+  const sourceFlags = (spine: Spine, opts: Parameters<typeof runDeterministicCheck>[2] = {}) => byRule(runDeterministicCheck(spine, [], opts), "source_missing")
+
+  it("yêu cầu do AI soạn thiếu source_ref ⇒ đỏ không waive, đúng bước sở hữu; có nguồn ⇒ không cờ", () => {
+    const spine = variant((s) => {
+      delete s.functions[0].source_ref
+      s.nfrs[0].source_ref = "  "
+      delete s.business_rules[0].source_ref
+    })
+    const flags = sourceFlags(spine)
+    expect(flags.map((f) => f.target_id).sort()).toEqual([FIXTURE.functions[0].id, FIXTURE.nfrs[0].id, FIXTURE.business_rules[0].id].sort())
+    expect(flags.every((f) => f.level === "red")).toBe(true)
+    expect(NON_WAIVABLE_RULES.has("source_missing")).toBe(true)
+    expect(sourceFlags(FIXTURE)).toEqual([])
+  })
+
+  it("bước sở hữu chưa chốt ⇒ chưa đòi nguồn", () => {
+    const spine = variant((s) => {
+      delete s.nfrs[0].source_ref
+      s.steps = s.steps.filter((st) => !st.id.startsWith("S-6."))
+    })
+    expect(sourceFlags(spine).filter((f) => f.target_id === FIXTURE.nfrs[0].id)).toEqual([])
+  })
+
+  it("chế độ 1 (nội dung trích từ file có sẵn) không bị đòi nguồn", () => {
+    const spine = variant((s) => delete s.functions[0].source_ref)
+    expect(sourceFlags(spine, { ruleProfile: MODE1_RULE_PROFILE })).toEqual([])
+  })
+})
+
+describe("tầng 2: content_type_missing", () => {
+  const typeFlags = (spine: Spine, opts: Parameters<typeof runDeterministicCheck>[2] = {}) => byRule(runDeterministicCheck(spine, [], opts), "content_type_missing")
+
+  it("thiếu thuật ngữ sau khi bước sở hữu đã chốt ⇒ cờ vàng waive được; chưa chốt thì chưa cờ", () => {
+    const missing = variant((s) => (s.glossary = []))
+    expect(typeFlags(missing)).toMatchObject([{ level: "yellow", section_id: "fixed:5.5", remediation_step: "S-8.1" }])
+    expect(RULES.find((r) => r.rule_id === "content_type_missing")).toMatchObject({ level: "yellow", waivable: true })
+    expect(
+      typeFlags(
+        variant((s) => {
+          s.glossary = []
+          s.steps = s.steps.filter((st) => st.id !== "S-8.1")
+        })
+      )
+    ).toEqual([])
+  })
+
+  it("mẫu bắt buộc không có mục đó ⇒ không đòi loại nội dung của mục", () => {
+    const layout = new Set(["fixed:1", "fixed:2.1"])
+    const flags = typeFlags(variant((s) => (s.glossary = [])), { ruleProfile: { exclude: new Set(), downgrade: new Set(), templateLayout: layout } })
+    expect(flags).toEqual([])
+  })
+})
+
+describe("checkTableStructure", () => {
+  const table = (...rows: string[][]) => ({ kind: "table", rows })
+
+  it("đúng cột, khác hoa thường / khoảng trắng ⇒ đạt; có thêm bảng ngoài mẫu ⇒ vẫn đạt", () => {
+    expect(checkTableStructure([table(["ID", "Rule"], ["[x]", "[y]"])], [{ kind: "paragraph", rows: null }, table([" id ", "RULE"], ["BR01", "a"]), table(["x"])])).toEqual([])
+  })
+
+  it("thiếu bảng / lệch số cột / sai tên cột ⇒ báo từng lỗi theo thứ tự bảng", () => {
+    const template = [table(["ID", "Rule"]), table(["Code", "Message", "Type"]), table(["A"])]
+    const draft = [table(["ID", "Description"]), table(["Code", "Message"])]
+    expect(checkTableStructure(template, draft)).toEqual([
+      { table: 1, reason: "header", expected: ["ID", "Rule"], actual: ["ID", "Description"] },
+      { table: 2, reason: "columns", expected: ["Code", "Message", "Type"], actual: ["Code", "Message"] },
+      { table: 3, reason: "missing", expected: ["A"], actual: null }
+    ])
+  })
+
+  it("mẫu không có bảng ⇒ luôn đạt", () => {
+    expect(checkTableStructure([{ kind: "paragraph", rows: null }], [])).toEqual([])
+  })
+})
+
+describe("mức cờ theo business-flow 18/11", () => {
+  const profileOf = (layout: string[], extra: Partial<RuleProfile> = {}): RuleProfile => ({ exclude: new Set(), downgrade: new Set(), templateLayout: new Set(layout), ...extra })
+
+  it("'Cần xem lại' sau khi Lead từ chối baseline: section_stale_at_baseline và section_awaiting_reaccept chỉ là cờ vàng, waive được", () => {
+    for (const id of ["section_stale_at_baseline", "section_awaiting_reaccept"]) {
+      expect(RULES.find((r) => r.rule_id === id)).toMatchObject({ level: "yellow", waivable: true, at_baseline: true })
+    }
+    const spine = variant((s) => {
+      s.steps.find((x) => x.id === "S-3.4")!.status = "revision_requested"
+    })
+    const flags = byRule(runDeterministicCheck(spine, [], { atBaseline: true }), "section_awaiting_reaccept")
+    expect(flags).not.toHaveLength(0)
+    expect(flags.every((f) => f.level === "yellow")).toBe(true)
+    expect(red(runDeterministicCheck(spine, [], { atBaseline: true }))).toEqual([])
+  })
+
+  it("mục riêng của mẫu bắt buộc chưa có chữ thật ⇒ đỏ không waive; có nội dung ⇒ tự gỡ", () => {
+    const block = (text: string) => ({ kind: "paragraph" as const, text, rows: null, image_ref: null })
+    const section = (blocks: ReturnType<typeof block>[]) => ({ id: "CS30", heading: "Risk Summary", level: 2, blocks, source: "import" as const })
+    const empty = { ...FIXTURE, custom_sections: [section([block("[Describe the risks.]")])] }
+    const filled = { ...FIXTURE, custom_sections: [section([block("Payment gateway outage is the main risk.")])] }
+    const profile = profileOf(["fixed:1", "custom:CS30"])
+    const flags = byRule(runDeterministicCheck(empty, [], { ruleProfile: profile }), "template_section_empty")
+    expect(flags).toMatchObject([{ level: "red", section_id: "custom:CS30" }])
+    expect(NON_WAIVABLE_RULES.has("template_section_empty")).toBe(true)
+    expect(byRule(runDeterministicCheck(filled, [], { ruleProfile: profile }), "template_section_empty")).toEqual([])
+    // mục FlintFlow có dữ liệu mà mẫu không in vẫn chỉ nhắc (không có lối sửa trong tài liệu của khách)
+    expect(byRule(runDeterministicCheck(empty, [], { ruleProfile: profile }), "template_section_absent").every((f) => f.level === "yellow")).toBe(true)
+  })
+
+  it("đoạn nguyên văn nhắc phần tử đã đổi ⇒ đỏ không waive", () => {
+    expect(RULES.find((r) => r.rule_id === "original_text_mentions_changed")).toMatchObject({ level: "red", waivable: false })
+    expect(NON_WAIVABLE_RULES.has("original_text_mentions_changed")).toBe(true)
+  })
+})
+
+describe("mục mẫu chuẩn còn thiếu (khi không chọn 'Bổ sung các mục còn thiếu')", () => {
+  const standard = (spine: Spine, layout: string[], extra: Partial<RuleProfile> = {}) =>
+    byRule(runDeterministicCheck(spine, [], { ruleProfile: { exclude: new Set(), downgrade: new Set(), templateLayout: new Set(layout), ...extra } }), "standard_section_missing")
+  const empty = createEmptySpine({ name: "Lumen" })
+
+  it("mỗi mục mẫu chuẩn mà khung file không có và chưa có dữ liệu ⇒ một cờ vàng waive được", () => {
+    const flags = standard(empty, ["fixed:1", "fixed:2.1"])
+    expect(flags.length).toBeGreaterThan(5)
+    expect(flags.every((f) => f.level === "yellow")).toBe(true)
+    expect(new Set(flags.map((f) => f.section_id)).size).toBe(flags.length)
+    expect(flags.map((f) => f.section_id)).not.toContain("fixed:1")
+    expect(flags.map((f) => f.section_id)).not.toContain("fixed:2.1")
+    expect(flags[0].message).toContain("Mẫu chuẩn FlintFlow")
+    expect(flags[0].message).not.toMatch(/FPT|—/)
+    expect(RULES.find((r) => r.rule_id === "standard_section_missing")).toMatchObject({ level: "yellow", waivable: true })
+  })
+
+  it("mục chuẩn đã có trong khung file, đã giữ làm mục riêng, đã có dữ liệu, hoặc là mục cha / suy dẫn ⇒ không cờ", () => {
+    const ids = standard(empty, []).map((f) => f.section_id)
+    expect(ids).not.toContain("fixed:5.5")
+    expect(ids).not.toContain("fixed:3.1")
+    expect(standard(empty, ids.slice(1)).map((f) => f.section_id)).toEqual([ids[0]])
+    expect(standard(empty, [], { templateKept: new Set(ids) })).toEqual([])
+    expect(standard(FIXTURE, []).map((f) => f.section_id)).not.toContain("fixed:2.1")
+  })
+
+  it("không có khung mẫu (chế độ 2 / đã chọn Bổ sung) ⇒ luật không chạy", () => {
+    expect(byRule(runDeterministicCheck(empty, [], { atBaseline: true }), "standard_section_missing")).toEqual([])
+    expect(byRule(runDeterministicCheck(empty, [], { ruleProfile: MODE1_RULE_PROFILE, atBaseline: true }), "standard_section_missing")).toEqual([])
+  })
+})
+
+describe("FLF-480: câu cờ không lộ mã yêu cầu", () => {
+  it("source_missing gọi yêu cầu bằng câu trích, không bằng mã (N01 / BR07)", () => {
+    const spine = variant((s) => {
+      s.nfrs[0].source_ref = null
+      delete s.business_rules[0].source_ref
+    })
+    const flags = byRule(runDeterministicCheck(spine, []), "source_missing").filter((f) => [FIXTURE.nfrs[0].id, FIXTURE.business_rules[0].id].includes(f.target_id ?? ""))
+    expect(flags).toHaveLength(2)
+    for (const f of flags) expect(f.message).not.toContain(f.target_id)
   })
 })

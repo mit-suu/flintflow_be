@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import { elicitSchema } from "../../shared/ai/response-parser.js"
-import { answerText, answeredTopics, chatReplyQuestionId, currentBatch, indexOfQuestion, questionIdsFor, shapeChatQuestions, shapeOptions, shapeQuestions, splitNumberedAnswer, verifiedExcerpt, type ModelQuestion } from "./question-shape.js"
+import { answerText, answeredTopics, chatReplyQuestionId, currentBatch, indexOfQuestion, questionIdsFor, shapeChatQuestions, shapeOptions, shapeQuestions, splitNumberedAnswer, verifiedDecisionUpdates, verifiedExcerpt, type ModelQuestion } from "./question-shape.js"
 
 const opts = (...labels: string[]) => labels.map((label) => ({ label }))
 const q = (question: string, extra: Partial<ModelQuestion> = {}): ModelQuestion & { topic_key: string } => ({
@@ -82,7 +82,14 @@ describe("shapeQuestions", () => {
 
   it("câu mở không mang options/multiple; header cắt ≤ 12 ký tự", () => {
     const [open] = shapeQuestions([q("Mô tả quy trình đặt lịch?", { multiple: true, header: "  Quy trình đặt lịch  " })]).questions
-    expect(open).toMatchObject({ text: "Mô tả quy trình đặt lịch?", header: "Quy trình đặ" })
+    expect(open).toMatchObject({ text: "Mô tả quy trình đặt lịch?", header: "Quy trình…" })
+    const h = (header: string) => shapeQuestions([q("Hỏi?", { header })]).questions[0]?.header
+    expect(h("Dịch vụ ngoài")).toBe("Dịch vụ…")
+    expect(h("Quy tắc quan trọng")).toBe("Quy tắc…")
+    expect(h("Uptime")).toBe("Uptime")
+    expect(h("Khôngcókhoảngtrắng")).toBe("Khôngcókhoả…")
+    expect(Array.from(h("Hoả̉ng lâu dài hơn nhiều")!).length).toBeLessThanOrEqual(12)
+    expect(h("   ")).toBeUndefined()
     expect(open.options).toBeUndefined()
     expect(open).not.toHaveProperty("multiple")
     const [card] = shapeQuestions([q("Uptime?", { options: opts("99.9% (Khuyến nghị)", "99%"), multiple: false, header: "Uptime" })]).questions
@@ -278,5 +285,101 @@ describe("elicitSchema - inline (FLF-232)", () => {
     })
     const inlines = parsed.questions.map((item) => (item as { inline?: boolean }).inline)
     expect(inlines).toEqual([true, undefined, undefined, undefined])
+  })
+})
+
+describe("FLF-449: thẻ phương án qua shapeQuestions", () => {
+  const card = (extra: Partial<ModelQuestion> = {}) =>
+    q("Kênh nhắc lịch?", {
+      topic_key: "reminder_channel",
+      recommendation_reason: "Bạn nói bệnh nhân lớn tuổi ít dùng ứng dụng",
+      options: [
+        { label: "SMS (Khuyến nghị)", recommended: true, pros: ["Ai cũng nhận được"], cons: ["Tốn phí mỗi tin"], risks: ["Giả định số điện thoại đúng"] },
+        { label: "Zalo", pros: ["Miễn phí"] }
+      ],
+      ...extra
+    })
+
+  it("giữ ưu / nhược / rủi ro, cờ và lý do khuyến nghị tới hợp đồng gửi FE", () => {
+    const { questions, asked } = shapeQuestions([card()])
+    expect(questions[0].recommendation_reason).toBe("Bạn nói bệnh nhân lớn tuổi ít dùng ứng dụng")
+    expect(questions[0].options).toEqual(card().options)
+    // shape lại câu đang chờ (run-state) không làm rơi gì
+    expect(shapeQuestions(asked).questions).toEqual(questions)
+  })
+
+  it("phương án được khuyến nghị bị lọc ⇒ lý do không còn trỏ vào đâu, bỏ", () => {
+    const named = q("Tên hệ thống?", {
+      topic_key: "system_name",
+      recommendation_reason: "Gần với tên phòng khám",
+      options: [{ label: "Minh An System (Khuyến nghị)", recommended: true }, { label: "CarePoint" }, { label: "MediBook" }]
+    })
+    const { questions } = shapeQuestions([named])
+    expect(questions[0].options?.map((o) => o.label)).toEqual(["CarePoint", "MediBook"])
+    expect(questions[0].recommendation_reason).toBeUndefined()
+  })
+
+  it("noIdeaYet ⇒ bỏ cờ, đuôi và lý do; ghi log thay vì bỏ im", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {})
+    const { questions } = shapeQuestions([card()], { noIdeaYet: true })
+    expect(questions[0].options).toEqual([
+      { label: "SMS", pros: ["Ai cũng nhận được"], cons: ["Tốn phí mỗi tin"], risks: ["Giả định số điện thoại đúng"] },
+      { label: "Zalo", pros: ["Miễn phí"] }
+    ])
+    expect(questions[0].recommendation_reason).toBeUndefined()
+    expect(info).toHaveBeenCalledWith(expect.stringContaining("recommendation_dropped scope=no_idea_yet reason=no_idea_yet count=1 topics=reminder_channel"))
+    info.mockRestore()
+  })
+
+  it("run-state cũ: chỉ có đuôi, không cờ, không lý do ⇒ giữ nguyên như trước", () => {
+    const { questions } = shapeQuestions([q("Uptime?", { options: opts("99.9% (Khuyến nghị)", "99%") })])
+    expect(questions[0].options).toEqual(opts("99.9% (Khuyến nghị)", "99%"))
+    expect(questions[0].recommendation_reason).toBeUndefined()
+  })
+
+  it("chat Discovery giữ trường mới", () => {
+    const [chat] = shapeChatQuestions([{ question: "Nền tảng?", recommendation_reason: "r", options: [{ label: "Web (Khuyến nghị)", pros: ["Không cần cài"] }, "Mobile"] }])
+    expect(chat).toEqual({ question: "Nền tảng?", options: [{ label: "Web (Khuyến nghị)", pros: ["Không cần cài"], recommended: true }, { label: "Mobile" }], multiple: false, recommendation_reason: "r" })
+  })
+
+  it("elicitSchema → shapeQuestions: tin cũ chỉ có đuôi (Khuyến nghị) vẫn đọc được thành thẻ", () => {
+    const parsed = elicitSchema.parse({ reply: "Ok", questions: [{ question: "Uptime?", topic_key: "uptime", options: ["99.9% (Khuyến nghị)", "99%"] }] })
+    const { questions } = shapeQuestions(parsed.questions)
+    expect(questions[0].options?.map((o) => o.label)).toEqual(["99.9%", "99%"])
+  })
+})
+
+describe("verifiedDecisionUpdates (FLF-472, 5b)", () => {
+  const dc = (over: Record<string, unknown> = {}) => ({
+    id: "DC01",
+    topic_key: "external_partners",
+    question: "Đối tác ngoài nào nối API?",
+    answer: "Chỉ VNPay và MoMo",
+    step_id: "S-1",
+    at: "2026-11-01T00:00:00.000Z",
+    superseded_by: null,
+    ...over
+  })
+  const spine = { decisions: [dc()] } as never
+  const message = "À không, GHN và GHTK cũng nối API nhé"
+
+  it("khoá không có trong sổ ⇒ bỏ", () => {
+    expect(verifiedDecisionUpdates(spine, [{ topic_key: "shipping", answer: "GHN và GHTK cũng nối API" }], message)).toEqual([])
+  })
+
+  it("trích đoạn không phải chữ của tin ⇒ bỏ", () => {
+    expect(verifiedDecisionUpdates(spine, [{ topic_key: "external_partners", answer: "Thêm GHN, GHTK" }], message)).toEqual([])
+  })
+
+  it("hợp lệ (khoá chuẩn hoá được, trích đoạn nguyên văn) ⇒ trả mục đính chính", () => {
+    expect(verifiedDecisionUpdates(spine, [{ topic_key: "External Partners", answer: "GHN và GHTK cũng nối API" }], message)).toEqual([
+      { topic_key: "external_partners", question: "Đối tác ngoài nào nối API?", answer: "GHN và GHTK cũng nối API", correction: true }
+    ])
+  })
+
+  it("trùng đáp án đang có, chủ đề đang chờ, hoặc quyết định đã bị thay thế ⇒ bỏ", () => {
+    expect(verifiedDecisionUpdates(spine, [{ topic_key: "external_partners", answer: "chỉ vnpay và momo" }], "Chỉ VNPay và MoMo")).toEqual([])
+    expect(verifiedDecisionUpdates(spine, [{ topic_key: "external_partners", answer: "GHN và GHTK cũng nối API" }], message, ["external_partners"])).toEqual([])
+    expect(verifiedDecisionUpdates({ decisions: [dc({ superseded_by: "DC02" })] } as never, [{ topic_key: "external_partners", answer: "GHN và GHTK cũng nối API" }], message)).toEqual([])
   })
 })

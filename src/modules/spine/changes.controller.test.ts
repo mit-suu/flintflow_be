@@ -10,7 +10,9 @@ vi.mock("./spine.repository.js", () => ({
 vi.mock("../../shared/auth/auth.middleware.js", () => ({ authMiddleware: vi.fn() }))
 vi.mock("./change.service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./change.service.js")>()
-  return { ...actual, apply: vi.fn(), preview: vi.fn() }
+  // `previewAndMaybeApply` (lệnh gõ trong chat) dùng chung hàm xem trước giả: test chỉ khác nhau ở kết quả preview trả về
+  const preview = vi.fn()
+  return { ...actual, apply: vi.fn(), preview, previewAndMaybeApply: (...args: unknown[]) => preview(...args) }
 })
 vi.mock("./reconcile.service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./reconcile.service.js")>()
@@ -508,5 +510,55 @@ describe("changes.route", () => {
       const route = layer?.route as unknown as { stack: { handle: unknown }[] }
       expect(route.stack[0].handle).toBe(authMiddleware)
     }
+  })
+})
+
+describe("sửa qua chat: giữ ý sau cảnh báo, bản sửa tự ghi", () => {
+  const SESSION = "650000000000000000000003"
+  const EMPTY_IMPACT = { fields: [], sections: [], diagrams: [], referrers: [] }
+  const CHANGE = { op: "set", path: "actors[id=A01].name", before: "Founder", value: "Student", reason: null }
+  const fakeSession = () => {
+    const session = { projectId: PROJECT, messages: [] as IChatMessage[], reply_language: "vi" as string | null, save: vi.fn(async () => undefined) }
+    vi.mocked(ChatSession.findById).mockResolvedValue(session as never)
+    return session
+  }
+  const payloadOf = (message: IChatMessage) => JSON.parse(message.content) as Record<string, unknown>
+
+  it("áp bản xem trước có cảnh báo ('Vẫn làm') ⇒ tin đã áp trong phiên ghi kept_warning; bản một phần ghi request_open", async () => {
+    const session = fakeSession()
+    vi.mocked(changeService.apply).mockResolvedValue({
+      txn: "t3",
+      spine_version: 3,
+      changes: [{ ...CHANGE, projectId: PROJECT, seq: 5, txn: "t3", at: "2026-10-07T00:00:00.000Z", by: OWNER, step_id: null }],
+      spine: SPINE_STUB,
+      branch: "dependent",
+      impact: EMPTY_IMPACT,
+      kept_warning: "Trái điều đã chốt.",
+      request_open: true
+    })
+    const outcome = await invoke(applyChanges, OWNER, PROJECT, { base_version: 2, instruction: "Đổi tên actor A01 thành Student", preview_id: "pv1", session_id: SESSION })
+    expect(outcome.status).toBe(200)
+    expect(payloadOf(session.messages[0])).toMatchObject({ kind: "change_applied", kept_warning: "Trái điều đã chốt.", request_open: true })
+  })
+
+  it("lượt xem trước đã tự ghi ⇒ tin phiên là change_applied (auto_applied), cờ nội bộ auto_apply_ok không lộ ra response", async () => {
+    const session = fakeSession()
+    vi.mocked(changeService.preview).mockResolvedValue({
+      ok: true,
+      txn: "t",
+      base_version: 1,
+      ops: [],
+      changes: [CHANGE],
+      violations: [],
+      referrers: [],
+      auto_applied: true,
+      applied_version: 2,
+      auto_apply_ok: true
+    })
+    const outcome = await invoke(previewChanges, OWNER, PROJECT, { base_version: 1, instruction: "đổi tên actor A01 thành Student", session_id: SESSION })
+    expect(outcome.status).toBe(200)
+    expect(outcome.body).toMatchObject({ data: { auto_applied: true, applied_version: 2 } })
+    expect((outcome.body as { data: Record<string, unknown> }).data).not.toHaveProperty("auto_apply_ok")
+    expect(payloadOf(session.messages[1])).toMatchObject({ kind: "change_applied", auto_applied: true, count: 1, spine_version: 2 })
   })
 })

@@ -1,0 +1,261 @@
+/**
+ * review.service.ts — FLF-453, business-flow §3.1.2 "Rà soát phần có sẵn" (bước 1.11, 1.12 cũ của chế độ 3/4; không
+ * nhầm với 1.11/1.12 của chế độ 1 trong `check.service.ts`). Vòng rà soát chạy TRƯỚC Luồng 2 khi file còn thiếu mục
+ * (chế độ 3/4):
+ * - I-5 đã chạy luật Code (Tầng 1, 2, 3 theo luật, `flags.service.ts`) trên mọi mục có sẵn ngay trong `finalize.service.ts`,
+ *   không tốn credit.
+ * - AI chỉ rà các mục **là đầu vào của phần thiếu** (bảng §4 owner/reads của `section-registry.ts` — cùng dữ liệu C-3
+ *   Impact dùng) và mục đang mang **cờ đỏ** do Code bắt.
+ * - Không mục nào cần rà (vd file chỉ có heading) ⇒ bỏ qua vòng rà soát, sang thẳng Luồng 2 (hành vi trước FLF-453,
+ *   `enterFlow2` gọi ngay — không đổi).
+ * Rà xong ⇒ Luồng 2 từ 2.4 (`enterFlow2`).
+ */
+
+import { ActionType } from "../../shared/ai/ai-action.types.js"
+import { getActionCost } from "../../shared/ai/credit-reservation.service.js"
+import type { FindingsOutput } from "../../shared/ai/response-parser.js"
+import { applyTransaction } from "../spine/op-engine.js"
+import { FIELD_SECTION_MAP } from "../spine/section-registry.js"
+import * as spineRepository from "../spine/spine.repository.js"
+import type { Flag, Spine } from "../spine/spine.types.js"
+import { Usage } from "../spine/usage.model.js"
+import { ApiError } from "../../shared/utils/api-error.js"
+import { IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
+import { DocBlock } from "./doc-block.model.js"
+import { type CheckBlock, findingOps, parallelBatches, runLimited, semanticBatches, semanticProjection, stripRecord } from "./check.service.js"
+import { userStopRequested } from "./extract.service.js"
+import { enterFlow2, type Flow2Result } from "./flow2.service.js"
+import type { IImportedDocument } from "./imported-document.model.js"
+import { withMeteredAi } from "./metered-ai.js"
+import type { TargetStructure } from "./target-structure.js"
+
+/** Cờ của vòng rà soát (business-flow §3.1.2) — vàng, người dùng Chấp nhận / Giữ nguyên + lý do (`flags.service.ts`). */
+export const REVIEW_RULE = "import_review"
+/** Tiền tố step — tách khỏi `I-1.11` (1.11 thật, chế độ 1) để hai vòng không tranh id Usage khi cùng tồn tại trên dữ liệu cũ. */
+export const REVIEW_STEP = "I-1.11r"
+const reviewBatchStep = (n: number): string => `${REVIEW_STEP}:${n}`
+
+/** `owner` của bảng §4 khớp một section_id thật: literal (`fixed:1`) hoặc khuôn `feature:<id>` / `function:<id>`. */
+const ownerMatchesSection = (owner: string, sectionId: string): boolean => {
+  if (owner === sectionId) return true
+  const m = /^(feature|function):<.*>$/.exec(owner)
+  return !!m && sectionId.startsWith(`${m[1]}:`)
+}
+
+/**
+ * Mục có sẵn là đầu vào của ít nhất một mục còn thiếu — tra bảng §4 `owner`/`reads` của `section-registry.ts` (cùng dữ
+ * liệu C-3 Impact dùng): `reads` của một hàng là các mục bị ảnh hưởng khi `owner` đổi, nên `owner` chính là "đầu vào"
+ * của mục trong `reads`. Product Overview (`fixed:1`) luôn là đầu vào của Brief: sang Luồng 2, B-1…S-1 luôn mở lại để
+ * phân tích phần đã có (`flow2.service.ts` `FLOW2_BRIEF_PHASES`), bất kể owner/reads của bảng §4.
+ */
+export const reviewInputSections = (structure: Pick<TargetStructure, "sections" | "missing">): string[] => {
+  if (!structure.missing.length) return []
+  const missingIds = new Set(structure.missing)
+  // `diagram:<kind>` (cột derived/reads) là hình thuộc mục sở hữu của hàng `diagram_<kind>`: mục đó thiếu ⇒ hình thiếu
+  for (const r of FIELD_SECTION_MAP) {
+    const kind = /^diagram_(.+)$/.exec(r.key)?.[1]
+    if (kind && r.owner.some((o) => missingIds.has(o))) missingIds.add(`diagram:${kind}`)
+  }
+  /** Dạng id trong reads/derived khớp một mục thiếu: literal, hoặc khuôn `function:<screen>` / `feature:<id>`. */
+  const touchesMissing = (token: string): boolean => {
+    if (missingIds.has(token)) return true
+    const m = /^(feature|function):<.*>$/.exec(token)
+    return !!m && [...missingIds].some((id) => id.startsWith(`${m[1]}:`))
+  }
+  const present = structure.sections.filter((s) => s.status === "present").map((s) => s.section_id)
+  const inputs = new Set<string>()
+  for (const row of FIELD_SECTION_MAP) {
+    if (![...row.reads, ...row.derived].some(touchesMissing)) continue
+    for (const owner of row.owner) for (const id of present) if (ownerMatchesSection(owner, id)) inputs.add(id)
+  }
+  if (present.includes("fixed:1")) inputs.add("fixed:1")
+  return [...inputs]
+}
+
+/** Mục có sẵn đang mang cờ đỏ chưa gỡ (Code bắt ở I-5 — `flags.service.ts` `recompute`, business-flow §3.1.2). */
+export const redFlaggedPresentSections = (structure: Pick<TargetStructure, "sections">, flags: readonly Flag[]): string[] => {
+  const present = new Set(structure.sections.filter((s) => s.status === "present").map((s) => s.section_id))
+  return [...new Set(flags.filter((f) => f.level === "red" && f.resolved_at === null && present.has(f.section_id)).map((f) => f.section_id))]
+}
+
+/**
+ * Mục Code chọn cho AI rà trước Luồng 2 (business-flow §3.1.2) — hợp của hai nhóm trên. Rỗng ⇒ bỏ qua vòng rà soát.
+ */
+export const sectionsNeedingAiReview = (structure: Pick<TargetStructure, "sections" | "missing">, flags: readonly Flag[]): string[] => [
+  ...new Set([...reviewInputSections(structure), ...redFlaggedPresentSections(structure, flags)])
+]
+
+/**
+ * Cờ đỏ chưa gỡ của các mục đang rà, đưa cho AI để đề xuất cách sửa (BF §3.1.2 "Mỗi phát hiện: AI đề xuất cách sửa"; §5.4). AI không quyết
+ * định cờ đỏ — chỉ đề xuất. `ref` = `target_id` của cờ (thiếu ⇒ id cờ): finding đề xuất mang đúng `ref` làm `target_id`. Mục Ngoài phạm vi
+ * không được rà nên không có mặt ở đây.
+ */
+export const redFlagsForPrompt = (spine: Pick<Spine, "flags">, sectionIds: readonly string[]): string =>
+  JSON.stringify(
+    spine.flags
+      .filter((f) => f.level === "red" && f.resolved_at === null && sectionIds.includes(f.section_id))
+      .map((f) => ({ ref: f.target_id ?? f.id, rule: f.rule_id, section_id: f.section_id, message: f.message }))
+  )
+
+const reviewBlocks = async (projectId: string, sectionIds: readonly string[]): Promise<CheckBlock[]> =>
+  DocBlock.find({
+    projectId,
+    doc_version: { $in: IMPORTED_DOC_VERSIONS },
+    kind: { $in: ["paragraph", "list_item", "table_cell"] },
+    section_id: { $in: [...sectionIds] }
+  })
+    .sort({ "anchor.ordinal": 1 })
+    .select("block_id text section_id mentions guidance_layer")
+    .lean<CheckBlock[]>()
+
+/** Ước tính credit vòng rà soát (báo trước khi chạy, business-flow §2 "Báo trước khi chạy hàng loạt"). */
+export const estimateReviewCredit = async (projectId: string, sectionIds: readonly string[]): Promise<{ batches: number; calls: number; credits: number }> => {
+  if (!sectionIds.length) return { batches: 0, calls: 0, credits: 0 }
+  const blocks = await reviewBlocks(projectId, sectionIds)
+  const batches = semanticBatches(blocks).length
+  if (!batches) return { batches: 0, calls: 0, credits: 0 }
+  const cost = await getActionCost(ActionType.IMPORT_REVIEW_EXISTING)
+  return { batches, calls: batches, credits: batches * cost }
+}
+
+const loadSpine = async (projectId: string): Promise<Spine> => {
+  const record = await spineRepository.get(projectId)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
+  return stripRecord(record)
+}
+
+const applyReviewFindings = async (projectId: string, findings: FindingsOutput["findings"], reason: string): Promise<void> => {
+  if (!findings.length) return
+  const spine = await loadSpine(projectId)
+  const ops = findingOps(spine, findings, REVIEW_RULE)
+  if (ops.length) await applyTransaction(projectId, { base_version: spine.spine_version, ops, by: "import", reason, step_id: null })
+}
+
+type ReviewGuard = () => Promise<void>
+const noGuard: ReviewGuard = async () => undefined
+
+/**
+ * Chạy các lô AI rà `sectionIds` (dùng chung cho vòng cụm và nút "Rà soát bằng AI" của một mục): bỏ lô đã trừ credit (`doneRe`),
+ * ghi phát hiện của mọi lô thành công rồi mới dừng. Trả `{ paused: true }` (đã đặt `doc.paused`) khi có lô lỗi / hết credit /
+ * người dùng Dừng; ngược lại `null`.
+ */
+const runReviewBatches = async (
+  doc: IImportedDocument,
+  userId: string,
+  sectionIds: readonly string[],
+  guard: ReviewGuard,
+  stepFor: (n: number) => string,
+  doneRe: RegExp
+): Promise<{ paused: true } | null> => {
+  const projectId = String(doc.projectId)
+  const done = new Set<string>(await Usage.find({ projectId, step_id: { $regex: doneRe }, state: "deducted" }).distinct("step_id"))
+  const blocks = await reviewBlocks(projectId, sectionIds)
+  const spine = await loadSpine(projectId)
+  const batches = semanticBatches(blocks)
+    .map((b, i) => ({ ...b, step_id: stepFor(i + 1) }))
+    .filter((b) => !done.has(b.step_id))
+  const results = await runLimited(batches, parallelBatches(), async (batch) => {
+    await guard()
+    // BF §2 "Dừng giữa chừng": Code ngắt lượt gọi kế tiếp, lô chưa chạy chưa trừ credit
+    if (await userStopRequested(doc)) return { ok: false as const, reason: "user" as const }
+    return withMeteredAi<FindingsOutput>({ projectId, userId, stepId: batch.step_id }, ActionType.IMPORT_REVIEW_EXISTING, {
+      section_ids: batch.section_ids.join(", "),
+      projection: semanticProjection(spine),
+      red_flags: redFlagsForPrompt(spine, batch.section_ids),
+      blocks: batch.lines
+    })
+  })
+  // Ghi hết kết quả thành công của mọi lô (lô song song khác đã trừ credit, resume sẽ bỏ qua vì `deducted`), rồi mới dừng
+  let failure: Extract<(typeof results)[number], { ok: false }> | null = null
+  for (const r of results) {
+    if (!r) continue
+    if (!r.ok) {
+      if (!failure || r.reason === "credits") failure = r
+      continue
+    }
+    await applyReviewFindings(projectId, r.data.findings, "AI rà soát phần có sẵn (business-flow §3.1.2)")
+  }
+  if (failure) {
+    doc.paused = { reason: failure.reason, at: new Date() }
+    await doc.save()
+    return { paused: true }
+  }
+  return null
+}
+
+/**
+ * Chạy vòng rà soát (business-flow §3.1.2) rồi vào Luồng 2. `sectionIds` rỗng ⇒ không gọi AI, vào Luồng 2 ngay (nhánh
+ * "không mục nào cần rà"). Lượt AI lỗi / hết credit ⇒ `doc.paused` được đặt, trả `{ paused: true }`, giữ tiến độ — lượt
+ * đã trừ credit (`Usage` `deducted`) không gọi lại khi resume (gọi lại chính hàm này).
+ */
+export const runReview = async (
+  doc: IImportedDocument,
+  userId: string,
+  sectionIds: readonly string[],
+  guard: ReviewGuard = noGuard
+): Promise<{ paused: true } | Flow2Result> => {
+  const projectId = String(doc.projectId)
+  // Chạy tiếp sau khi dừng: xoá dấu `paused` cũ; bấm Dừng sau đó được đọc lại từ DB trước mỗi lô (`userStopRequested`)
+  doc.paused = null
+  await doc.save()
+  if (sectionIds.length) {
+    const stopped = await runReviewBatches(doc, userId, sectionIds, guard, reviewBatchStep, /^I-1\.11r(:|$)/)
+    if (stopped) return stopped
+  }
+  // Dừng bấm sau lô cuối: không sang Luồng 2 (lần tiếp tục sẽ chạy lại, lô đã trừ credit được bỏ qua)
+  if (await userStopRequested(doc)) return { paused: true }
+  return enterFlow2(doc, userId)
+}
+
+// ─── Nút "Rà soát bằng AI" cho một mục chỉ được Code kiểm (business-flow §3.1.2) ───
+
+/** Tiền tố step lô của một mục (`I-1.11r:s:<mục>:<n>`) — không đụng id lô của vòng cụm (`I-1.11r:<n>`). */
+const sectionBatchPrefix = (sectionId: string): string => `${REVIEW_STEP}:s:${sectionId}:`
+const escapeRe = (v: string): string => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+export interface OptionalReviewSection {
+  section_id: string
+  title: string
+  calls: number
+  credits: number
+}
+
+/**
+ * Mục có sẵn chỉ được Code kiểm (không nằm trong `review_sections` của vòng cụm), còn chữ thật để AI rà (không tính chữ hướng
+ * dẫn / mục Ngoài phạm vi, vì `status` phải là `present` và lô lấy qua `semanticBatches`) và chưa được rà riêng. Kèm credit
+ * riêng của từng mục, báo trước khi người dùng xác nhận (business-flow §2). Mục đã rà riêng xong (có lô `deducted`) thì không
+ * còn hiện (rà lại sẽ không có gì mới).
+ */
+export const optionalReviewSections = async (
+  projectId: string,
+  structure: Pick<TargetStructure, "sections"> | null | undefined,
+  reviewSections: readonly string[]
+): Promise<OptionalReviewSection[]> => {
+  const chosen = new Set(reviewSections)
+  const candidates = (structure?.sections ?? []).filter((s) => s.status === "present" && !chosen.has(s.section_id))
+  if (!candidates.length) return []
+  const blocks = await reviewBlocks(projectId, candidates.map((s) => s.section_id))
+  const cost = await getActionCost(ActionType.IMPORT_REVIEW_EXISTING)
+  // Lô đã trừ credit (giữ `:n`): mục chỉ coi là đã rà khi MỌI lô của mục đã `deducted` (mục rà dở vẫn rà tiếp được)
+  const done = new Set<string>(await Usage.find({ projectId, step_id: { $regex: /^I-1\.11r:s:/ }, state: "deducted" }).distinct("step_id"))
+  const out: OptionalReviewSection[] = []
+  for (const s of candidates) {
+    const prefix = sectionBatchPrefix(s.section_id)
+    const calls = semanticBatches(blocks.filter((b) => b.section_id === s.section_id)).filter((_, i) => !done.has(`${prefix}${i + 1}`)).length
+    if (calls) out.push({ section_id: s.section_id, title: s.title, calls, credits: calls * cost })
+  }
+  return out
+}
+
+/**
+ * Rà riêng một mục (qua cùng `runReviewBatches`: `semanticBatches`, `applyReviewFindings`, cờ `import_review`). KHÔNG sang
+ * Luồng 2 (import vẫn `reviewing`). Lỗi / hết credit / Dừng ⇒ `doc.paused` được đặt, `{ paused: true }`, lô đã trừ credit không
+ * chạy lại khi gọi lại.
+ */
+export const runSectionReview = async (doc: IImportedDocument, userId: string, sectionId: string): Promise<{ paused: true } | { reviewed: true }> => {
+  doc.paused = null
+  await doc.save()
+  const prefix = sectionBatchPrefix(sectionId)
+  const stopped = await runReviewBatches(doc, userId, [sectionId], noGuard, (n) => `${prefix}${n}`, new RegExp(`^${escapeRe(prefix)}\\d+$`))
+  return stopped ?? { reviewed: true }
+}

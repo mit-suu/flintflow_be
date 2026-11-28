@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   LOCK_TTL_MS,
   acquireRun,
+  assertNoRunningStep,
   activeRunCount,
   cancelRun,
   clearRuns,
@@ -173,5 +174,14 @@ describe("FLF-221: lượt của step đã rời registry", () => {
     const live = await acquireRun(PROJECT, "B-1.1")
     await touchRun(PROJECT, "B-1.1", live.run_id, { status: "waiting_answer" })
     expect((await getActiveRun(PROJECT))?.step_id).toBe("B-1.1")
+  })
+})
+
+describe("gửi Lead duyệt khi đang có lượt soạn", () => {
+  it("lượt đang chạy ⇒ 409 SUBMIT_STEP_RUNNING; lượt xong ⇒ gửi được", async () => {
+    const run = await acquireRun(PROJECT, STEP, { by: "u1" })
+    await expect(assertNoRunningStep(PROJECT)).rejects.toMatchObject({ statusCode: 409, code: "SUBMIT_STEP_RUNNING" })
+    await finishRun(PROJECT, STEP, run.run_id, "done")
+    await expect(assertNoRunningStep(PROJECT)).resolves.toBeUndefined()
   })
 })

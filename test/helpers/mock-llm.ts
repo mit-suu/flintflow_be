@@ -56,6 +56,16 @@ export const mockCalls: RecordedCall[] = []
 /** Ảnh kèm từng lượt gọi (phase 5): loại + độ dài base64, theo thứ tự gọi. */
 export const mockImages: { mime: string; bytes: number }[][] = []
 
+/** Dòng `key: "text"` của prompt skeleton-generic-names ⇒ chữ gốc (có thể là `{text, current}`). */
+const unquote = (raw: string): string => {
+  try {
+    const v = JSON.parse(raw) as string | { text: string }
+    return typeof v === "string" ? v : v.text
+  } catch {
+    return raw
+  }
+}
+
 /** Ghi đè từng lượt (vd ép lỗi); trả `undefined` để đi đường mặc định. */
 export const mockOverrides: {
   next?: (prompt: string) => string | Error | undefined
@@ -82,6 +92,10 @@ export const mockCallLLM = async (
   if (override instanceof Error) throw override
 
   let text = override
+  if (text === undefined && prompt.includes("Generic names for template headings")) {
+    // UC-85: đổi tên riêng ở heading khi đề xuất mẫu sau baseline - mặc định giữ nguyên mọi heading (test cần thì ghi đè)
+    text = JSON.stringify({ suggestions: [...prompt.matchAll(/^([BT]\d{4,}): (.+)$/gm)].map((m) => ({ key: m[1], generic: unquote(m[2]), reason: null })) })
+  }
   if (text === undefined) {
     if (kind === "draft") {
       const opCase = stepId ? findOpCase(stepId) : null

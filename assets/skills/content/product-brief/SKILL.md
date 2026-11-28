@@ -1,7 +1,7 @@
 ---
 skill_id: product-brief
 kind: content
-version: 0.5.0
+version: 0.7.0
 description: "B-0 Intake, B-1 Product Brief, B-2 Brief Finalize - adapted from BMAD bmad-product-brief"
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -84,7 +84,7 @@ never write a section the product does not need. B-1 never writes `project.visio
 | B-1.3 Value proposition & differentiation | addendum: what makes this worth using over the current way, per user group, drawn from vision/goals/B-1.2 - never invent a moat; no competitor questions or competitor assumptions for internal or public-sector projects | `fixed:1` |
 | B-1.4 MVP scope & feature hypotheses | addendum per capability, and the explicit not-now list. **A limit the user set on the first release** (how many use cases / screens / functions, "bản đầu gọn", which platform first, "chưa làm X") is scope ⇒ always `fixed:1` (S-2.2 turns it into Release 1.0 scope), never `fixed:3.1.2` | capability `fixed:1` or `fixed:3.1.2` (Screen Descriptions); limit / not-now `fixed:1` |
 | B-1.5 Success metrics & learning goals | addendum per metric, with a number where the user gave one | `fixed:4.2.2`, `fixed:4.2.3` |
-| B-1.6 Risks, assumptions, open questions | `other_requirements[]` (`kind` = `risk` / `assumption` / `open_question`; `statement` English + `statement_vi` in the user's language, same meaning) **and** `assumptions[]` for anything you filled in yourself. `notes` = the closing brief summary, 2–4 sentences: problem & goals (read from the vision/goals addendum), main users, first-release scope, how success is measured, the biggest risk. Do NOT list assumptions in `notes` - the server says them | `fixed:5.4` |
+| B-1.6 Risks, assumptions, open questions | `other_requirements[]` (`kind` = `risk` / `assumption` / `open_question`; `statement` English + `statement_vi` in the user's language, same meaning) **and** `assumptions[]` for anything you filled in yourself. `notes` = the closing brief summary, 2–4 sentences: problem & goals (read from the vision/goals addendum), main users, first-release scope, how success is measured, the biggest risk. Do NOT list assumptions in `notes` - the server says them. A `revision` where the user answers an `open_question`: `remove` it and list it in `answered_questions` (beside `ops`) as `{ "id": "OR11", "answer": "<user's words, verbatim>" }` - the server saves it to the decisions ledger and rejects a removal without the answer; an answer that states a rule to print also gets an `addendum[]` entry. Never reuse a removed id | `fixed:5.4` |
 
 Goal entries are outcomes, not features: "cut the time to a first usable SRS from weeks to a day",
 not "add an export button". 3–6 of them; more than that and none of them is a goal.
@@ -107,6 +107,15 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
   never happened. `project.system_name` still null ⇒ if the answers hold a name the user picked, `set` it; none
   picked ⇒ leave it null, never invent one. Then hand over: accepting this gate opens S-1.
 
+<!-- ba-quality:shared:start -->
+**Analysis quality** - applies to every finding, gap, proposed change, recommendation and reason you write (not to the plain answer options of a question):
+- **(a) Quote it or drop it.** Each one rests on words you can copy verbatim from the uploaded documents, the Brief, the current SRS content or the user's messages. Where the output has a quote or source field, put that exact text there. Nothing to quote ⇒ do not raise it.
+- **(b) Never ask what is already answered** - in the documents, the Brief, the SRS content, a settled decision or an earlier answer.
+- **(c) Recommend only when you are sure**: a clear basis in the documents, the Brief, the SRS content or a settled decision. A recommendation always states its reason and that basis. Not sure ⇒ give the options side by side, with no recommendation.
+- **(d) Specific to this project, never generic advice**: name the screen, role, data or rule it is about.
+  - Fails: "nên cân nhắc bảo mật" (consider security).
+  - Passes: "màn đối soát hiện số tiền, nên chỉ cho vai Kế toán xem" (the reconciliation screen shows amounts, so only the Accountant role should see it).
+<!-- ba-quality:shared:end -->
 ## Rules
 
 1. Ids continue the existing sequence (`draft-to-ops` rule 5) - check the projection first.

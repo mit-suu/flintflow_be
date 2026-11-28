@@ -43,6 +43,15 @@ describe("vectorCandidates", () => {
     expect(await isVectorSearchSupported()).toBe(false)
   })
 
+  it("FLF-483: embedding tắt ⇒ log đúng một dòng cho cả process (không log lặp)", async () => {
+    embed.available = false
+    const info = vi.spyOn(console, "info").mockImplementation(() => {})
+    await vectorCandidates(PID, "x")
+    await vectorCandidates(PID, "y")
+    expect(info.mock.calls.filter((c) => String(c[0]).includes("EMBEDDING_PROVIDER=off"))).toHaveLength(1)
+    info.mockRestore()
+  })
+
   it("embedding tắt ⇒ [] không đụng DB; query rỗng ⇒ []", async () => {
     embed.available = false
     expect(await vectorCandidates(PID, "x")).toEqual([])

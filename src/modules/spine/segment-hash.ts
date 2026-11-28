@@ -57,8 +57,12 @@ export const isSegmentedSection = (sectionId: string): boolean => sectionId in S
 
 type Element = { id?: string } & Record<string, unknown>
 
-/** Phần tử của mảng có được mục đó in ra không (mục 1 chỉ in BR cấp cao + actor không phải người, NFR theo nhóm…). */
-const printsIn = (sectionId: string, array: string, el: Element): boolean => {
+/**
+ * Phần tử của mảng có được mục đó in ra không (mục 1 chỉ in BR cấp cao + actor không phải người, NFR theo nhóm…).
+ * Export cho `render/layout-sections.ts` (FLF-468 lát B): lọc phần tử hiện tại trước khi vá bảng của file theo đúng
+ * tập phần tử mà mục đó in ra, như `sectionItemKeys`.
+ */
+export const printsIn = (sectionId: string, array: string, el: Element): boolean => {
   if (sectionId === "fixed:1") {
     if (array === "business_rules") return el.tier === "high"
     if (array === "actors") return el.kind !== "human"
@@ -111,8 +115,8 @@ export const asPrintedIn = (sectionId: string, array: string, el: Record<string,
   return el
 }
 
-/** Field không in ra / đổi mà nội dung không đổi (thứ tự) — không vào dấu. */
-const VOLATILE_FIELDS = new Set(["order"])
+/** Field không in ra / đổi mà nội dung không đổi (thứ tự; câu trích nguồn của chỗ thiếu, FLF-449) — không vào dấu. */
+const VOLATILE_FIELDS = new Set(["order", "source_quote"])
 
 /** Mảng có tên hiển thị — đích của các tham chiếu mà bảng in tên thay cho id. */
 const NAMED_ARRAYS = ["actors", "roles", "use_cases", "features", "screens", "functions", "entities", "glossary", "messages"] as const

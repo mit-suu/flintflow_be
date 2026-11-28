@@ -24,6 +24,7 @@ import { textRegions } from "./drop-text.js"
 import { autoConfirmMapping, matchProfile } from "./profile-match.service.js"
 import { isKnownSectionId } from "./section-catalog.js"
 import type { TableMapEntry } from "./template-profile.model.js"
+import { buildSkeleton } from "./template-skeleton.js"
 
 /** Người thao tác: thành viên org theo vai trò, hoặc hệ thống (tự lưu khung sau baseline). */
 export interface TemplateActor {
@@ -62,7 +63,8 @@ export const analyzeTemplateFile = async (buffer: Buffer): Promise<AnalyzedTempl
   const pre = await preflightDocx(buffer)
   if (pre.status === "rejected") throw new Mode1Error("IMPORT_FILE_REJECTED", "File mẫu chưa nhập được, xem danh sách lỗi", { issues: pre.issues })
   const { blocks } = await parseDocument(buffer)
-  const matched = matchProfile(blocks, { fixedTemplate: true })
+  // FLF-459: file mẫu ⇒ chữ trong ngoặc vẫn là hướng dẫn của mẫu (nguồn lớp 2 khi import file theo mẫu này)
+  const matched = matchProfile(blocks, { fixedTemplate: true, templateFile: true })
   autoConfirmMapping(matched)
   // FLF-412: vùng heading còn chữ thật (mẫu chưa xoá nội dung cũ) ⇒ cảnh báo ở màn rà mapping
   const withText = new Set(textRegions(blocks, matched.heading_map).filter((r) => r.has_text).map((r) => r.key))
@@ -114,6 +116,15 @@ const analyzeLegacyFile = async (t: IOrgTemplate): Promise<Pick<AnalyzedTemplate
   }
 }
 
+const skeletonHashOfBuffer = async (buffer: Buffer, language: string): Promise<string | null> => {
+  try {
+    const built = await buildSkeleton(buffer, { projectName: "", language: language === "vi" ? "vi" : "en" })
+    return built.empty ? null : built.hash
+  } catch {
+    return null
+  }
+}
+
 /**
  * Bản ghi họ mẫu cũ (trước FLF-395, file + mapping nằm thẳng trên họ) ⇒ tạo bản 1 đã đăng từ đúng file đó; đọc lại file để có
  * `table_map` + `language`, mapping giữ nguyên như BA đã xác nhận. Đã có bản ⇒ không làm gì. Dùng chung cho script migrate
@@ -124,6 +135,8 @@ export const materializeLegacyVersion = async (t: IOrgTemplate): Promise<IOrgTem
   const existing = await OrgTemplateVersion.findOne({ template_id: t._id, version: 1 })
   if (existing) return existing
   const analyzed = await analyzeLegacyFile(t)
+  const language = analyzed.language
+  const skeletonHash = t.file_ref ? await skeletonHashOfBuffer(await docFileStore().load(t.file_ref).catch(() => Buffer.alloc(0)), language) : null
   let created: IOrgTemplateVersion
   try {
     // Bản 1 là mẫu đã có từ trước ⇒ giữ ngày tạo của họ cũ (thư viện hiện ngày theo `createdAt`), không lấy lúc tách
@@ -136,8 +149,9 @@ export const materializeLegacyVersion = async (t: IOrgTemplate): Promise<IOrgTem
       project_id: null,
       source_file: t.source_file,
       file_ref: t.file_ref,
+      ...(skeletonHash ? { skeleton_hash: skeletonHash } : {}),
       template_family: t.template_family ?? analyzed.template_family,
-      language: analyzed.language,
+      language,
       headings: t.headings,
       table_map: analyzed.table_map,
       created_by: t.created_by,
@@ -184,6 +198,7 @@ export const createDraftVersion = async (
   analyzed: AnalyzedTemplate
 ): Promise<IOrgTemplateVersion> => {
   await materializeLegacyVersion(family)
+  const skeletonHash = await skeletonHashOfBuffer(file.buffer, analyzed.language)
   const fileRef = await docFileStore().save(file.buffer, { projectId: `org-${orgId}`, kind: "upload", name: file.originalname })
   try {
     return await createNextVersion({
@@ -194,6 +209,7 @@ export const createDraftVersion = async (
       project_id: null,
       source_file: { name: file.originalname, size: file.size, sha256: createHash("sha256").update(file.buffer).digest("hex") },
       file_ref: fileRef,
+      ...(skeletonHash ? { skeleton_hash: skeletonHash } : {}),
       template_family: analyzed.template_family,
       language: analyzed.language,
       headings: analyzed.headings,
@@ -304,9 +320,11 @@ export const publishVersion = async (
     if (!isKnownSectionId(e.section_id)) throw new ApiError(400, "Mục được chọn không có trong mẫu.", "VALIDATION_ERROR", { field: "headings" })
     headings[e.index] = { heading_text: headings[e.index].heading_text, section_id: e.section_id, ...(headings[e.index].guidance ? { guidance: headings[e.index].guidance } : {}) }
   }
+  const skeletonHash =
+    draft.skeleton_hash ?? (await skeletonHashOfBuffer(await docFileStore().load(draft.file_ref).catch(() => Buffer.alloc(0)), draft.language))
   const published = await OrgTemplateVersion.findOneAndUpdate(
     { _id: draft._id, status: "draft" },
-    { $set: { status: "published", headings, published_at: new Date() } },
+    { $set: { status: "published", headings, published_at: new Date(), ...(skeletonHash ? { skeleton_hash: skeletonHash } : {}) } },
     { returnDocument: "after", runValidators: true }
   )
   if (!published) throw new ApiError(409, "Bản này vừa được đăng.", "ORG_TEMPLATE_VERSION_PUBLISHED")
@@ -318,8 +336,7 @@ export const publishVersion = async (
 
 /** D3: báo Lead + Analyst (không Viewer, không người vừa đăng) khi org còn dự án theo bản cũ hơn. Lỗi không chặn việc đăng. */
 const notifyNewVersion = async (orgId: string, family: IOrgTemplate, version: number, actorUserId: string, skipProjectIds: readonly string[]): Promise<void> => {
-  // Khung tự lưu (D12) chỉ thuộc dự án nguồn: dự án khác chỉ dùng chung vì khung trùng, không bị kéo theo cấu trúc mới (chốt 10/11)
-  if (family.skeleton_of) return
+  // Mẫu lưu từ dự án sau khi Lead duyệt là mẫu org như mọi mẫu khác (quyết định 25/11): dự án theo bản cũ hơn được báo như mẫu Lead đăng
   try {
     // Dự án đã lưu trữ không còn làm việc ⇒ không báo
     const projects = await Project.find({ organizationId: orgId, status: { $ne: "archived" }, _id: { $nin: skipProjectIds }, "template_ref.template_id": family._id, "template_ref.version": { $lt: version } })
@@ -435,8 +452,10 @@ export interface OrgTemplateSummary {
   pending_count: number
   /** Mẫu khung tự lưu từ một dự án (D12). */
   skeleton: boolean
-  /** Dự án nguồn của mẫu khung tự lưu (mở màn duyệt heading chờ từ thư viện); mẫu thường ⇒ `null`. */
+  /** Dự án nguồn của mẫu lưu từ dự án (UC-85 / UC-88); mẫu thường ⇒ `null`. */
   skeleton_source_project_id: string | null
+  /** Tên dự án nguồn - FE hiện "Lưu từ dự án <tên>"; dự án đã xoá ⇒ `null`. */
+  skeleton_source_project_name: string | null
   /** Mới nhất trước. Bản nháp chỉ trả cho Lead. */
   versions: TemplateVersionSummary[]
 }
@@ -496,6 +515,10 @@ const summarizeFamilies = async (orgId: string, role: OrgRole, families: IOrgTem
     ])
   ])
   const names = await publisherNames(orgId, [...versions.map((v) => v.created_by), ...families.filter(isLegacy).map((f) => f.created_by)])
+  const sourceIds = families.flatMap((f) => (f.skeleton_of ? [f.skeleton_of] : []))
+  const sourceNames = new Map(
+    sourceIds.length ? (await Project.find({ _id: { $in: sourceIds } }).select("name").lean()).map((p) => [String(p._id), p.name] as const) : []
+  )
   const countOf = (t: unknown, v: number) => counts.find((c) => String(c._id.t) === String(t) && c._id.v === v)?.n ?? 0
   return families.flatMap((f) => {
     const own = versions.filter((v) => String(v.template_id) === String(f._id))
@@ -521,6 +544,7 @@ const summarizeFamilies = async (orgId: string, role: OrgRole, families: IOrgTem
         pending_count: summaries[0]?.pending_count ?? 0,
         skeleton: !!f.skeleton_of,
         skeleton_source_project_id: f.skeleton_of ? String(f.skeleton_of) : null,
+        skeleton_source_project_name: f.skeleton_of ? (sourceNames.get(String(f.skeleton_of)) ?? null) : null,
         versions: summaries
       }
     ]

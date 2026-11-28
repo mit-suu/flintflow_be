@@ -1,24 +1,22 @@
 import { z } from "zod"
 import { ActionType, AiActionError } from "./ai-action.types.js"
+import { logRecommendationDropped, modelOptionAnalysisSchema, normalizeRecommendation, optionalModelText, type OptionAnalysis } from "./option-analysis.js"
 
 // Schemas per ActionType
-/** Lựa chọn của một câu hỏi, đã chuẩn hoá — cùng hình dạng `options` trong hợp đồng `Question`. */
-export interface QuestionOption {
-  label: string
-  description?: string
-  preview?: string
-}
+/**
+ * Lựa chọn của một câu hỏi, đã chuẩn hoá — cùng hình dạng `options` trong hợp đồng `Question`. FLF-449 N1: là
+ * `OptionAnalysis` dùng chung (thêm ưu / nhược / rủi ro và cờ khuyến nghị).
+ */
+export type QuestionOption = OptionAnalysis
 
 /** Chuỗi model bỏ trống hoặc để `null` coi như không có — một field thừa không được làm hỏng cả lượt hỏi. */
 const optionalText = z.string().nullish().transform((v) => (v == null || v.trim() === "" ? undefined : v))
 
-/** Model mới trả `{label, description?, preview?}`; prompt cũ (và tin nhắn cũ) trả chuỗi trơn. */
-const modelOptionSchema = z.union([
-  z.string().transform((label): QuestionOption => ({ label })),
-  z.object({ label: z.string(), description: optionalText, preview: optionalText }).transform(
-    ({ label, description, preview }): QuestionOption => ({ label, ...(description ? { description } : {}), ...(preview ? { preview } : {}) })
-  )
-])
+/**
+ * Model mới trả `{label, description?, preview?, pros?, cons?, risks?, recommended?}`; prompt cũ (và tin nhắn cũ) trả chuỗi
+ * trơn. Trước FLF-449 schema này bỏ mọi trường lạ, nên ưu / nhược / rủi ro phải khai ở đây mới tới được FE.
+ */
+const modelOptionSchema = modelOptionAnalysisSchema
 
 const questionFields = {
   question: z.string(),
@@ -26,26 +24,58 @@ const questionFields = {
   options: z.array(modelOptionSchema).optional(),
   /** Dạng cũ trước FLF-220 — vẫn nhận, map sang `options`. */
   suggestedAnswers: z.array(z.string()).optional(),
-  multiple: z.boolean().optional().default(false)
+  multiple: z.boolean().optional().default(false),
+  /** FLF-449 (03 #3): vì sao khuyến nghị phương án có cờ `recommended`, trỏ về điều cụ thể của dự án. */
+  recommendation_reason: optionalModelText
 }
 
 /** Gộp `suggestedAnswers` cũ vào `options`; `options` mới thắng khi có cả hai. */
-const toOptions = <T extends { options?: QuestionOption[]; suggestedAnswers?: string[] }>({ options, suggestedAnswers, ...rest }: T) => ({
+const toOptions = <T extends { options?: QuestionOption[]; suggestedAnswers?: string[]; recommendation_reason?: string }>({
+  options,
+  suggestedAnswers,
+  recommendation_reason,
+  ...rest
+}: T) => ({
   ...rest,
-  options: options ?? (suggestedAnswers ?? []).map((label): QuestionOption => ({ label }))
+  options: options ?? (suggestedAnswers ?? []).map((label): QuestionOption => ({ label })),
+  ...(recommendation_reason ? { recommendation_reason } : {})
 })
+
+/**
+ * FLF-449 (03 #3): luật khuyến nghị cho câu hỏi của vòng Elicit — prompt `elicit-loop` đòi lý do. Khuyến nghị thiếu
+ * `recommendation_reason` ⇒ bỏ cờ + đuôi, giữ thẻ, ghi log. Chat tự do (`chat.md`) chưa đòi lý do (lát 2) nên không áp.
+ */
+const enforceRecommendation = <T extends { question: string; topic_key?: string; options: QuestionOption[]; recommendation_reason?: string }>({
+  recommendation_reason,
+  ...question
+}: T) => {
+  const normalized = normalizeRecommendation(question.options, recommendation_reason, question.question)
+  if (normalized.dropped) logRecommendationDropped("elicit", normalized.dropped, [question.topic_key ?? "(không có chủ đề)"])
+  return {
+    ...question,
+    options: normalized.options,
+    ...(normalized.recommendation_reason ? { recommendation_reason: normalized.recommendation_reason } : {})
+  }
+}
 
 export const chatQuestionSchema = z.object(questionFields).transform(toOptions)
 
 export const chatQuestionItemSchema = z.union([
   chatQuestionSchema,
-  z.string().transform((q) => ({ question: q, header: undefined as string | undefined, options: [] as QuestionOption[], multiple: false }))
+  z.string().transform((q) => ({ question: q, header: undefined as string | undefined, options: [] as QuestionOption[], multiple: false}))
 ])
+
+/**
+ * FLF-472: tin user SỬA lại một điều đã chốt trong sổ quyết định — `answer` là trích đoạn nguyên văn của tin. Server kiểm
+ * (`verifiedDecisionUpdates`) rồi mới ghi; chỉ nhận tối đa 3 mục một lượt (không ràng buộc ở schema để không bỏ cả lượt).
+ */
+export const decisionUpdatesSchema = z.array(z.object({ topic_key: z.string().min(1), answer: z.string().min(1) })).optional()
 
 export const chatSchema = z.object({
   reply: z.string(),
   questions: z.array(chatQuestionItemSchema).optional().default([]),
-  suggestedQuestions: z.array(z.string()).optional()
+  suggestedQuestions: z.array(z.string()).optional(),
+  decision_updates: decisionUpdatesSchema
 })
 
 // Task 2b: schema cho action SUMMARIZE_DOCUMENT
@@ -141,12 +171,45 @@ const sourcesField = z
   )
   .optional()
 
+/**
+ * FLF-472: một câu hỏi mở (hoặc chủ đề tự do ở lời cổng) mà user vừa trả lời trong tin của lượt revision. `id` = mã
+ * `other_requirements` của câu hỏi (null khi là câu hỏi tự do trong lời cổng, lúc đó đưa `question`); `answer` = lời user
+ * (trích nguyên văn, không diễn giải). Server đổi mỗi mục thành một dòng sổ quyết định trước khi câu hỏi bị đóng.
+ */
+export const answeredQuestionSchema = z.object({
+  id: z.string().nullish().transform((v) => (v && v.trim() !== "" ? v.trim() : null)),
+  answer: z.string(),
+  question: z.string().nullish().transform((v) => v ?? undefined),
+  topic_key: z.string().nullish().transform((v) => v ?? undefined)
+})
+
+export type AnsweredQuestion = z.infer<typeof answeredQuestionSchema>
+
+/** Như `localized`: tuỳ chọn, không phải mảng ⇒ coi như không có; mục sai khuôn bị bỏ (câu thiếu `answer` thì không có gì để lưu). */
+const answeredQuestionsField = z
+  .unknown()
+  .transform((value): AnsweredQuestion[] | undefined =>
+    Array.isArray(value)
+      ? value.flatMap((entry) => {
+          const parsed = answeredQuestionSchema.safeParse(entry)
+          return parsed.success ? [parsed.data] : []
+        })
+      : undefined
+  )
+  .optional()
+
 export const opTransactionSchema = z.object({
   txn: z.string().optional(),
   ops: z.array(opSchema),
   notes: z.string().optional(),
   localized: localizedField,
-  sources: sourcesField
+  sources: sourcesField,
+  answered_questions: answeredQuestionsField,
+  /** FLF-482 (C2): phần lời sửa mà bước này không ghi được (nằm ở mục khác). Chỉ chuỗi không rỗng mới có nghĩa. */
+  out_of_scope: z
+    .unknown()
+    .transform((v): string | undefined => (typeof v === "string" && v.trim() !== "" ? v.trim() : undefined))
+    .optional()
 })
 
 /**
@@ -162,8 +225,9 @@ export const elicitQuestionSchema = z.union([
       /** FLF-232: câu mở đã hỏi ngay trong `reply` — FE không vẽ lại thành thẻ; server vẫn theo dõi qua `topic_key`. */
       inline: z.boolean().nullish().transform((v) => v ?? undefined)
     })
-    .transform(toOptions),
-  z.string().transform((q) => ({ question: q, header: undefined as string | undefined, options: [] as QuestionOption[], multiple: false }))
+    .transform(toOptions)
+    .transform(enforceRecommendation),
+  z.string().transform((q) => ({ question: q, header: undefined as string | undefined, options: [] as QuestionOption[], multiple: false}))
 ])
 
 const elicitBaseSchema = z.object({
@@ -180,9 +244,20 @@ export const elicitSchema = elicitBaseSchema.extend({
    * FLF-393 (business-flow §3.6): câu chờ mà tài liệu tham khảo đã trả lời ⇒ chốt kèm `source_paras` (mã đoạn `D1-P391`).
    * Server tra mã ra chữ thật và đòi câu trả lời là trích đoạn nguyên văn của đoạn đó, rồi ghi nguồn cho quyết định.
    */
-  settled: z.array(z.object({ topic_key: z.string().min(1), answer: z.string(), source_paras: z.array(z.string()).max(5).optional() })).optional(),
+  settled: z
+    .array(
+      z.object({
+        topic_key: z.string().min(1),
+        /** FLF-472: `id` của câu đang chờ (`Q_…` trong `pending_questions`) — khớp theo id trước, `topic_key` sau. */
+        id: z.string().optional(),
+        answer: z.string(),
+        source_paras: z.array(z.string()).max(5).optional()
+      })
+    )
+    .optional(),
   /** `topic_key` của câu đang chờ mà tin này KHÔNG trả lời — server không tự chốt câu đó bằng luật trả-lời-lặp. */
-  still_open: z.array(z.string()).optional()
+  still_open: z.array(z.string()).optional(),
+  decision_updates: decisionUpdatesSchema
 })
 
 /** B-0…B-2: vừa hỏi vừa ghi ngay (addendum, project.*) — ops tuỳ chọn. Không có `settled`. */
@@ -196,7 +271,11 @@ export const reviewFlagSchema = z.object({
   rule_id: z.string().optional(),
   /** Khoá logic section: `fixed:3.1.3`, `feature:F2`, `function:FN07`. */
   section_id: z.string().min(1),
-  message: z.string().min(1)
+  message: z.string().min(1),
+  /** FLF-449: câu trích nguyên văn (Content, quyết định, giả định hoặc tài liệu) — code hậu kiểm bằng `verifyQuote`. */
+  quote: z.string().optional(),
+  /** FLF-449: id phần tử bị nêu (nếu có) — code kiểm có thật trong Spine. */
+  target_id: z.string().nullable().optional()
 })
 
 export const reviewSchema = z.object({
@@ -210,9 +289,44 @@ export const changeInstructionSchema = z
     choices: z.array(z.string().trim().min(1).max(80)).max(6).optional(),
     /** FLF-311: tên use case model TỰ đề xuất thêm (ngoài yêu cầu) để khớp dự án — người dùng giữ hay bỏ. */
     proposed_use_cases: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
+    /**
+     * Câu trả lời cho câu hỏi giao diện do model đọc (số theo `use_case_context.ui_asked`): bỏ / màn riêng / popup / màn
+     * có sẵn / dùng chung. Code kiểm số và kiểu rồi dùng thay cách đọc bằng luật (`uiPlanFromModel`). Sai hình ⇒ bỏ qua
+     * trường này (không làm hỏng cả lô).
+     */
+    ui_plan: z
+      .array(
+        z.object({
+          index: z.number().int(),
+          drop: z.boolean().optional(),
+          ui: z.enum(["own", "popup", "shared", "existing"]).optional(),
+          screen: z.string().trim().max(120).optional(),
+          group: z.number().int().optional(),
+          merge: z.boolean().optional(),
+          popup_screens: z.array(z.string().trim().max(120)).max(10).optional()
+        })
+      )
+      .max(30)
+      .optional()
+      .catch(undefined),
     txn: z.string().optional(),
+    /** Lệnh nhiều ý: ý rõ ra op ngay, ý mơ hồ gom vào MỘT `clarification_needed` — cả hai có thể cùng có mặt. */
     ops: z.array(opSchema).optional(),
     notes: z.string().optional(),
+    /** Yêu cầu không hợp lý (theo ISO 29148 / điều đã chốt): lý do ngắn, ngôn ngữ trả lời. Người dùng vẫn có thể bấm "Vẫn làm". */
+    warning: z.string().trim().min(1).max(400).optional(),
+    /** Chỗ AI tự đoán vì yêu cầu chưa nói rõ (sau khi đã hỏi đủ lượt). `path` là chỗ trong tài liệu điều đoán nói về. */
+    assumptions: z
+      .array(
+        z.object({
+          path: z.string().min(1),
+          statement: z.string().trim().min(1),
+          statement_vi: z.string().trim().min(1).max(200).optional(),
+          rationale: z.string().trim().min(1).optional()
+        })
+      )
+      .max(6)
+      .optional(),
     localized: localizedField
   })
   .refine((v) => Boolean(v.clarification_needed) || (v.ops?.length ?? 0) > 0, {
@@ -274,7 +388,16 @@ export const importExtractSchema = z.object({
     })
   ),
   /** Block trong section không trích được gì (văn xuôi giới thiệu, ghi chú) — đưa vào gap report nếu cần. */
-  unmapped_block_ids: z.array(blockIdRef).default([])
+  unmapped_block_ids: z.array(blockIdRef).default([]),
+  /**
+   * FLF-444: nội dung không phải loại heading gợi ý (mục "Use Case" mà bên trong là test case) - mô tả ngắn nội dung thật.
+   * Code tin nội dung và đánh dấu để người xác nhận ở bước 1.6.
+   */
+  content_mismatch: z.object({ content: z.string().min(1).max(300) }).nullable().optional(),
+  /** FLF-444: chỗ cho lớp 4 chữ hướng dẫn (BF §3.1.1, đoạn chỉ một dấu hiệu) - AI phân loại trong cùng lượt đọc. */
+  guidance_blocks: z.array(z.object({ block_id: blockIdRef, is_guidance: z.boolean(), confidence })).optional(),
+  /** FLF-444: chỗ cho loại nội dung ISO/IEC/IEEE 29148 theo block (thuộc / không thuộc phạm vi SRS). */
+  content_types: z.array(z.object({ block_id: blockIdRef, iso29148: z.string().min(1).max(80), in_scope: z.boolean(), confidence })).optional()
 })
 
 /** Loại diagram mà I-4 đọc được từ ảnh (mode 1 v3 phase 5; FLF-390 thêm sequence, activity); `other` ⇒ không đọc, giữ ảnh gốc. */
@@ -285,6 +408,12 @@ export type DiagramImageKind = (typeof DIAGRAM_IMAGE_KINDS)[number]
 export const importExtractDiagramSchema = importExtractSchema.extend({
   diagram_kind: z.enum(DIAGRAM_IMAGE_KINDS)
 })
+
+/** FLF-492 (CR_RECORD_SUMMARY): một câu ngắn cho mỗi dòng Record of Changes (khoá theo `cr_id` + loại A / M / D). */
+export const crRecordSummarySchema = z.object({
+  rows: z.array(z.object({ cr_id: z.string().min(1), kind: z.enum(["A", "M", "D"]), text: z.string().trim().min(1).max(400) })).max(100)
+})
+export type CrRecordSummaryOutput = z.infer<typeof crRecordSummarySchema>
 
 /** FLF-395 (SKELETON_GENERIC_NAMES, D13): dạng chung gợi ý cho từng mục BA tự đặt; `generic: null` = không dùng lại được. */
 export const skeletonGenericNamesSchema = z.object({
@@ -310,22 +439,57 @@ export const crMaterialImageSchema = z.object({ text: z.string().trim().min(1) }
 /**
  * FLF-338 (EXTRACT_REQUIREMENTS, §3.6.1): danh sách yêu cầu rút từ tài liệu thô. Code hậu kiểm mã đoạn / trích dẫn / đường dẫn
  * phần tử (`extraction.service.normalizeItems`) — schema chỉ giữ hình.
+ * FLF-449 (P6): không còn trần 40 mục — model trả nhiều hơn là lỗi parse mất cả lượt; độ dài đã bị chặn bởi `maxTokens` của
+ * skill và tài liệu dài được chia lô. Thêm nhãn `inferred` + khối `inference`, `speaker`, `sides`, `situation` (đều tuỳ chọn).
  */
+const extractionSourcedSchema = z.object({ para_id: z.string().nullable().default(null), quote: z.string().default("") })
 export const extractRequirementsSchema = z.object({
+  situation: z
+    .object({
+      current: z.array(extractionSourcedSchema.extend({ text: z.string().default("") })).default([]),
+      desired: z.array(extractionSourcedSchema.extend({ text: z.string().default("") })).default([])
+    })
+    .nullable()
+    .default(null),
   requirements: z
     .array(
       z.object({
         id: z.string().min(1),
         text: z.string().min(1),
         source: z.object({ para_id: z.string().min(1), quote: z.string().default("") }),
-        label: z.enum(["new", "modification", "duplicate", "contradiction", "ambiguous"]),
+        label: z.enum(["new", "modification", "duplicate", "contradiction", "ambiguous", "inferred"]),
         entity_paths: z.array(z.string().min(1)).default([]),
         group: z.string().nullable().default(null),
+        speaker: z.string().nullable().default(null),
+        sides: z.array(extractionSourcedSchema.extend({ speaker: z.string().nullable().default(null) })).default([]),
+        inference: z
+          .object({
+            symptom: z.string().default(""),
+            symptom_quote: z.string().default(""),
+            symptom_para_id: z.string().nullable().default(null),
+            root_cause: z.string().default(""),
+            rationale: z.string().default(""),
+            options: z
+              .array(
+                z.object({
+                  label: z.string().default(""),
+                  description: z.string().nullable().default(null),
+                  pros: z.array(z.string()).default([]),
+                  cons: z.array(z.string()).default([]),
+                  risks: z.array(z.string()).default([])
+                })
+              )
+              .default([]),
+            recommended: z.number().int().nullable().default(null),
+            recommendation_reason: z.string().nullable().default(null),
+            serves_goal: z.string().nullable().default(null)
+          })
+          .nullable()
+          .default(null),
         question: z.string().nullable().default(null),
         suggested_answers: z.array(z.string().min(1)).default([])
       })
     )
-    .max(40)
     .default([])
 })
 
@@ -336,7 +500,9 @@ export const findingsSchema = z.object({
         rule: z.string().min(1),
         section_id: z.string().min(1),
         message: z.string().min(1),
-        block_ids: z.array(blockIdRef).default([])
+        block_ids: z.array(blockIdRef).default([]),
+        /** FLF-453: finding đề xuất cách sửa cho một cờ đỏ (`red_flags` của prompt rà soát) mang `ref` của cờ đó. */
+        target_id: z.string().min(1).nullish()
       })
     )
     .max(30)
@@ -359,6 +525,24 @@ export const crClarifySchema = z
       .array(z.object({ question: z.string().trim().min(1), suggestions: z.array(z.string().min(1)).max(4).default([]) }))
       .max(5)
       .default([]),
+    /**
+     * Yêu cầu không hợp lý (BF §3.2 C-4): cảnh báo + lý do, hỏi người yêu cầu "Vẫn làm" hay bỏ. Cùng dạng và cùng cách hỏi
+     * một lần như `contradictions`; không tính vào `ambiguous`.
+     */
+    warnings: z
+      .array(z.object({ question: z.string().trim().min(1), suggestions: z.array(z.string().min(1)).max(4).default([]) }))
+      .max(3)
+      .default([]),
+    /**
+     * Người yêu cầu đã trả lời một cảnh báo ở vòng trước và câu trả lời có nghĩa là vẫn làm (kể cả lời tự gõ như "cứ làm
+     * đi, khách chốt rồi") ⇒ `true`. Code còn nhận khi người yêu cầu bấm đúng gợi ý đầu ("Vẫn làm"). Sai hình ⇒ bỏ qua.
+     */
+    warning_accepted: z.boolean().optional().catch(undefined),
+    /**
+     * Câu trả lời vòng vừa rồi, đọc như người đọc, là lời rút lại cả yêu cầu ("thôi khách đổi ý rồi, khỏi làm") ⇒ `true`.
+     * Code chỉ hỏi người dùng có huỷ CR không, không tự huỷ. Sai hình ⇒ bỏ qua.
+     */
+    withdraw: z.boolean().optional().catch(undefined),
     targets: z.object({
       entity_paths: z.array(z.string().min(1)).default([]),
       keywords: z.array(z.string().min(1)).default([])
@@ -384,7 +568,9 @@ export const crProposeSchema = z.object({
         comment_text: z.string().min(1).optional(),
         spine_ops: z.array(opSchema).default([]),
         /** Mode 1 v3 phase 7: dữ kiện model tự giả định khi viết đề xuất này. */
-        assumptions: z.array(z.string().min(1)).max(10).default([])
+        assumptions: z.array(z.string().min(1)).max(10).default([]),
+        /** C-4: yêu cầu không hợp lý ở chỗ này ⇒ cảnh báo + lý do (kết luận `comment`, chưa soạn) cho tới khi BA chọn "Vẫn làm". */
+        warning: z.object({ text: z.string().trim().min(1), reason: z.string().trim().min(1) }).nullable().optional()
       })
       .refine((l) => l.conclusion !== "edit" || l.spine_ops.length > 0, { message: "edit cần spine_ops" })
       .refine((l) => l.conclusion !== "comment" || l.comment_text !== undefined, { message: "comment cần comment_text" })
@@ -445,10 +631,12 @@ export const OUTPUT_SCHEMA_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, s
   [ActionType.IMPORT_EXTRACT_DIAGRAM]: "importExtractDiagram",
   [ActionType.IMPORT_SEMANTIC_CHECK]: "findings",
   [ActionType.IMPORT_CROSS_CHECK]: "findings",
+  [ActionType.IMPORT_REVIEW_EXISTING]: "findings",
   [ActionType.CR_CLARIFY]: "crClarify",
   [ActionType.CR_PROPOSE]: "crPropose",
   [ActionType.CR_CONSISTENCY]: "findings",
   [ActionType.CR_MATERIAL_IMAGE]: "crMaterialImage",
+  [ActionType.CR_RECORD_SUMMARY]: "crRecordSummary",
   [ActionType.KNOWLEDGE_ANSWER]: "knowledgeAnswer",
   [ActionType.EXTRACT_REQUIREMENTS]: "extractRequirements",
   [ActionType.SKELETON_GENERIC_NAMES]: "skeletonGenericNames",
@@ -475,10 +663,12 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.IMPORT_EXTRACT_DIAGRAM]: importExtractDiagramSchema,
   [ActionType.IMPORT_SEMANTIC_CHECK]: findingsSchema,
   [ActionType.IMPORT_CROSS_CHECK]: findingsSchema,
+  [ActionType.IMPORT_REVIEW_EXISTING]: findingsSchema,
   [ActionType.CR_CLARIFY]: crClarifySchema,
   [ActionType.CR_PROPOSE]: crProposeSchema,
   [ActionType.CR_CONSISTENCY]: findingsSchema,
   [ActionType.CR_MATERIAL_IMAGE]: crMaterialImageSchema,
+  [ActionType.CR_RECORD_SUMMARY]: crRecordSummarySchema,
   [ActionType.KNOWLEDGE_ANSWER]: knowledgeAnswerSchema,
   [ActionType.EXTRACT_REQUIREMENTS]: extractRequirementsSchema,
   [ActionType.SKELETON_GENERIC_NAMES]: skeletonGenericNamesSchema,

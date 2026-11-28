@@ -11,7 +11,8 @@
         "category": "interface",
         "statement": "The system exchanges JSON over HTTPS with the payment gateway and accepts signed webhook callbacks.",
         "kind": "descriptive",
-        "priority": null
+        "priority": null,
+        "source_ref": "Client brief"
       },
       "reason": "S-6 interface"
     },
@@ -23,7 +24,8 @@
         "category": "interface",
         "statement": "The system calls the AI model provider over HTTPS and treats every response as untrusted until parsed.",
         "kind": "descriptive",
-        "priority": null
+        "priority": null,
+        "source_ref": "Client brief"
       },
       "reason": "S-6 interface"
     },
@@ -35,7 +37,8 @@
         "category": "interface",
         "statement": "The system renders diagrams by posting PlantUML source to the render service and storing the returned SVG and PNG.",
         "kind": "descriptive",
-        "priority": null
+        "priority": null,
+        "source_ref": "Client brief"
       },
       "reason": "S-6 interface"
     },
@@ -47,7 +50,8 @@
         "category": "interface",
         "statement": "The product is used in a desktop browser and exports documents as Office Open XML files.",
         "kind": "descriptive",
-        "priority": null
+        "priority": null,
+        "source_ref": "Client brief"
       },
       "reason": "S-6 interface"
     }

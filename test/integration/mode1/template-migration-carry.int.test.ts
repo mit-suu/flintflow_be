@@ -11,12 +11,11 @@ import app from "../../../src/app.js"
 import { seedFixture, type SeededFixture } from "../../setup.js"
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { createMode1Project, fakeMode1 } from "../../helpers/mode1.js"
-import { fileOf } from "../../helpers/mode1-import-p4.js"
+import { fileOf, runExtraction } from "../../helpers/mode1-import-p4.js"
 import { p, styled } from "../../../src/modules/docx-ooxml/testing/make-docx.js"
 import { makeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
 import { acceptLatest, uploadImport } from "../../../src/modules/import/import.service.js"
-import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { finalizeImport } from "../../../src/modules/import/finalize.service.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 import type { MigrationDto } from "../../../src/modules/template-migration/template-migration.service.js"
@@ -62,7 +61,7 @@ const migrate = async (token: string, projectId: string, body: object): Promise<
   await request(app).post(`${url}/${id}/confirm-mapping`).set(H(token))
   const dto = (await request(app).get(`${url}/${id}`).set(H(token))).body.data as MigrationDto
   const items = [...dto.groups.extra, ...dto.groups.conflict]
-  const decisions = dto.undecided.map((d) => {
+  const decisions = [...dto.groups.extra, ...dto.groups.conflict].map((i) => i.id).map((d) => {
     const item = items.find((i) => i.id === d)!
     const safe = item.choices.filter((c) => !item.ai_choices.includes(c) && !c.startsWith("move_to:"))
     return { id: d, choice: safe.find((c) => c === "keep_custom") ?? safe[0] }

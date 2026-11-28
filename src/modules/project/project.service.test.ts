@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
 const mocks = vi.hoisted(() => {
   const deleteMany = () => vi.fn(async (_filter: unknown) => ({ deletedCount: 1 }))
@@ -22,12 +22,15 @@ const mocks = vi.hoisted(() => {
     RenderedDocumentCache: { deleteMany: deleteMany() },
     getSpine: vi.fn(),
     getOrCreate: vi.fn(),
+    // FLF-477: redrawWithRetry gọi qua import động "../diagram/diagram.service.js"
+    renderDiagram: vi.fn(async () => {}),
+    redrawScreenLayoutsFromSpec: vi.fn(async () => {}),
     removeDiagram: vi.fn(async () => {}),
     removeDocFiles: vi.fn(async () => {}),
     // Mode 1 (FLF-171)
     ImportedDocument: { deleteMany: deleteMany() },
     DocBlock: { deleteMany: deleteMany() },
-    TemplateProfile: { deleteMany: deleteMany(), updateOne: vi.fn() },
+    TemplateProfile: { deleteMany: deleteMany(), updateOne: vi.fn(), findOne: vi.fn() },
     ExtractionDraft: { deleteMany: deleteMany() },
     FieldAnchor: { deleteMany: deleteMany() },
     ReuploadDiff: { deleteMany: deleteMany() },
@@ -69,7 +72,8 @@ vi.mock("../spine/change.model.js", () => ({ Change: mocks.Change }))
 vi.mock("../spine/baseline.model.js", () => ({ Baseline: mocks.Baseline }))
 vi.mock("../spine/usage.model.js", () => ({ Usage: mocks.Usage }))
 vi.mock("../render/rendered-document.model.js", () => ({ RenderedDocumentCache: mocks.RenderedDocumentCache }))
-vi.mock("../spine/spine.repository.js", () => ({ get: mocks.getSpine, getOrCreate: mocks.getOrCreate }))
+vi.mock("../spine/spine.repository.js", () => ({ get: mocks.getSpine, getOrCreate: mocks.getOrCreate, SPINE_VERSION_CONFLICT: "SPINE_VERSION_CONFLICT" }))
+vi.mock("../diagram/diagram.service.js", () => ({ renderDiagram: mocks.renderDiagram, redrawScreenLayoutsFromSpec: mocks.redrawScreenLayoutsFromSpec }))
 vi.mock("../diagram/diagram-file.store.js", () => ({ gridFsDiagramStore: { remove: mocks.removeDiagram } }))
 vi.mock("../import/imported-document.model.js", () => ({ ImportedDocument: mocks.ImportedDocument }))
 vi.mock("../import/doc-block.model.js", () => ({ DocBlock: mocks.DocBlock }))
@@ -100,6 +104,7 @@ vi.mock("../credits/subscription.model.js", () => ({ Subscription: { findOne: ()
 vi.mock("../user/account-locale.js", () => ({ accountLocaleOf: mocks.accountLocaleOf }))
 
 import * as projectService from "./project.service.js"
+import { ApiError } from "../../shared/utils/api-error.js"
 
 const PROJECT = "64b000000000000000000001"
 const USER = "64b000000000000000000002"
@@ -314,16 +319,17 @@ describe("createProject - ngôn ngữ tài liệu (FLF-265)", () => {
     expect(mocks.accountLocaleOf).not.toHaveBeenCalled()
   })
 
-  it("thiếu ⇒ lấy ngôn ngữ tài khoản (User.locale) của người tạo", async () => {
+  // FLF-456 (đảo FLF-265): tạo mới không file mặc định tiếng Anh, không theo ngôn ngữ giao diện
+  it("thiếu và giao diện tiếng Việt ⇒ vẫn en, không đọc ngôn ngữ tài khoản", async () => {
     mocks.accountLocaleOf.mockResolvedValueOnce("vi")
 
     await projectService.createProject(ORG, USER, "Lumen")
 
-    expect(mocks.accountLocaleOf).toHaveBeenCalledWith(USER)
-    expect(stored().documentLanguage).toBe("vi")
+    expect(mocks.accountLocaleOf).not.toHaveBeenCalled()
+    expect(stored().documentLanguage).toBe("en")
   })
 
-  it("thiếu và tài khoản chưa chọn (accountLocaleOf null) ⇒ en", async () => {
+  it("thiếu ⇒ en", async () => {
     await projectService.createProject(ORG, USER, "Lumen")
 
     expect(stored().documentLanguage).toBe("en")
@@ -340,10 +346,14 @@ describe("createProject - ngôn ngữ tài liệu (FLF-265)", () => {
 describe("setDocumentLanguage (FLF-265)", () => {
   beforeEach(() => vi.clearAllMocks())
 
-  const existing = (value: { mode: string } | null) =>
+  // FLF-456: lần đọc dự án (+ hồ sơ mẫu) để xét file nền, trước lệnh ghi
+  const existing = (value: { mode?: string; converted_from?: string; template_ref?: unknown } | null, profile: { source_file_ref?: string; migrated_base_at?: Date } | null = null) => {
     mocks.Project.findOne.mockReturnValueOnce({ select: () => ({ lean: async () => value }) })
+    mocks.TemplateProfile.findOne.mockReturnValueOnce({ select: () => ({ lean: async () => profile }) })
+  }
 
   it("ghi field, lọc theo org và loại dự án mode 1 ngay trong lệnh ghi", async () => {
+    existing({ mode: "fpt" })
     mocks.Project.findOneAndUpdate.mockResolvedValueOnce({ _id: PROJECT, documentLanguage: "vi" })
 
     await expect(projectService.setDocumentLanguage(PROJECT, ORG, "vi")).resolves.toMatchObject({ documentLanguage: "vi" })
@@ -352,22 +362,28 @@ describe("setDocumentLanguage (FLF-265)", () => {
       { documentLanguage: "vi" },
       { new: true }
     )
-    expect(mocks.Project.findOne).not.toHaveBeenCalled()
     expect(mocks.TemplateProfile.updateOne).not.toHaveBeenCalled()
   })
 
   it("FLF-318: dự án tạo SRS đã chuyển sang mode 1 vẫn đổi được; TemplateProfile.language đổi theo", async () => {
+    existing({ mode: "import", converted_from: "fpt" })
     mocks.Project.findOneAndUpdate.mockResolvedValueOnce({ _id: PROJECT, mode: "import", converted_from: "fpt", documentLanguage: "vi" })
     await expect(projectService.setDocumentLanguage(PROJECT, ORG, "vi")).resolves.toMatchObject({ converted_from: "fpt" })
     expect(mocks.TemplateProfile.updateOne).toHaveBeenCalledWith({ projectId: PROJECT }, { $set: { language: "vi" } })
   })
 
+  it("FLF-456: dự án tạo bằng chat đã chuyển, profile không có source_file_ref ⇒ vẫn đổi được", async () => {
+    existing({ mode: "import", converted_from: "fpt" }, { source_file_ref: null as any })
+    mocks.Project.findOneAndUpdate.mockResolvedValueOnce({ _id: PROJECT, mode: "import", converted_from: "fpt", documentLanguage: "en" })
+    await expect(projectService.setDocumentLanguage(PROJECT, ORG, "en")).resolves.toMatchObject({ documentLanguage: "en" })
+  })
+
   it("dự án của org khác ⇒ 404 PROJECT_NOT_FOUND", async () => {
-    mocks.Project.findOneAndUpdate.mockResolvedValueOnce(null)
     existing(null)
 
     await expect(projectService.setDocumentLanguage(PROJECT, ORG, "vi")).rejects.toMatchObject({ statusCode: 404, code: "PROJECT_NOT_FOUND" })
     expect(mocks.Project.findOne).toHaveBeenCalledWith({ _id: PROJECT, organizationId: ORG })
+    expect(mocks.Project.findOneAndUpdate).not.toHaveBeenCalled()
   })
 
   it("id sai định dạng ⇒ 404, không chạm DB", async () => {
@@ -376,12 +392,106 @@ describe("setDocumentLanguage (FLF-265)", () => {
   })
 
   it("dự án mode 1 ⇒ 409 DOCUMENT_LANGUAGE_LOCKED", async () => {
-    mocks.Project.findOneAndUpdate.mockResolvedValueOnce(null)
     existing({ mode: "import" })
 
     await expect(projectService.setDocumentLanguage(PROJECT, ORG, "en")).rejects.toMatchObject({
       statusCode: 409,
       code: projectService.DOCUMENT_LANGUAGE_LOCKED
     })
+    expect(mocks.Project.findOneAndUpdate).not.toHaveBeenCalled()
+  })
+
+  // FLF-456: file nền = tải file (mode 1 / Luồng 2), chọn mẫu của org, hoặc đã áp mẫu khác
+  it.each([
+    ["dự án tạo từ mẫu của org (template_ref)", { mode: "fpt", template_ref: { template_id: "T1", version: 1 } }, null],
+    ["dự án Luồng 2 từ file tải lên (chế độ 3 / 4, chưa baseline)", { mode: "fpt" }, { source_file_ref: "file-1" }],
+    ["dự án chế độ 3/4 đã ký baseline 1.0 (converted_from = fpt, có source_file_ref)", { mode: "import", converted_from: "fpt" }, { source_file_ref: "file-1" }],
+    ["dự án đã áp mẫu mới (đổi mẫu)", { mode: "import", converted_from: "fpt" }, { migrated_base_at: new Date() }]
+  ])("%s ⇒ 409 DOCUMENT_LANGUAGE_LOCKED, không ghi", async (_name, project, profile) => {
+    existing(project, profile)
+
+    await expect(projectService.setDocumentLanguage(PROJECT, ORG, "vi")).rejects.toMatchObject({ statusCode: 409, code: projectService.DOCUMENT_LANGUAGE_LOCKED })
+    expect(mocks.Project.findOneAndUpdate).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * FLF-477 phần A: `redrawWithRetry` (dùng chung cho ERD / Sequence / Screen Layout) qua `setErdNotation` — hàm trực
+ * tiếp của plan fix. `SPINE_VERSION_CONFLICT` (bước pipeline đang ghi Spine xen giữa) được thử lại tối đa 3 lần;
+ * lỗi khác không thử lại. Ký pháp luôn được lưu dù vẽ lại thế nào (plan: "lựa chọn ký pháp đã lưu").
+ */
+describe("setErdNotation — vẽ lại ERD tự thử lại khi xung đột version (FLF-477)", () => {
+  const conflict = () => new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", "SPINE_VERSION_CONFLICT")
+
+  const existingErd = (erdNotation: string | undefined) =>
+    mocks.Project.findOne.mockReturnValueOnce({ select: () => ({ lean: async () => ({ erdNotation }) }) })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.getSpine.mockResolvedValue({ diagrams: [{ kind: "erd" }] })
+    mocks.Project.findOneAndUpdate.mockResolvedValue({ _id: PROJECT, erdNotation: "crowsfoot" })
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("SPINE_VERSION_CONFLICT lần 1, thành công lần 2 ⇒ gọi lại renderDiagram, erdRedraw = done", async () => {
+    existingErd("chen")
+    mocks.renderDiagram.mockRejectedValueOnce(conflict()).mockResolvedValueOnce(undefined)
+
+    const promise = projectService.setErdNotation(PROJECT, ORG, "crowsfoot", USER)
+    await vi.advanceTimersByTimeAsync(2000)
+    const result = await promise
+
+    expect(result).toEqual({ project: { _id: PROJECT, erdNotation: "crowsfoot" }, erdRedraw: "done" })
+    expect(mocks.renderDiagram).toHaveBeenCalledTimes(2)
+    // ký pháp đã được ghi trước khi vẽ lại, không phụ thuộc kết quả vẽ
+    expect(mocks.Project.findOneAndUpdate).toHaveBeenCalledWith({ _id: PROJECT, organizationId: ORG }, { erdNotation: "crowsfoot" }, { new: true })
+  })
+
+  it("ném SPINE_VERSION_CONFLICT cả 3 lần ⇒ pending, không ném lỗi ra ngoài, erdNotation vẫn lưu", async () => {
+    existingErd("chen")
+    mocks.renderDiagram.mockRejectedValue(conflict())
+
+    const promise = projectService.setErdNotation(PROJECT, ORG, "crowsfoot", USER)
+    await vi.advanceTimersByTimeAsync(5000)
+    const result = await promise
+
+    expect(result.erdRedraw).toBe("pending")
+    expect(result.project).toMatchObject({ erdNotation: "crowsfoot" })
+    expect(mocks.renderDiagram).toHaveBeenCalledTimes(3)
+    expect(console.warn).toHaveBeenCalled()
+  })
+
+  it("lỗi khác (không phải SPINE_VERSION_CONFLICT) ⇒ không thử lại, trả pending ngay", async () => {
+    existingErd("chen")
+    mocks.renderDiagram.mockRejectedValueOnce(new Error("PlantUML server lỗi"))
+
+    const result = await projectService.setErdNotation(PROJECT, ORG, "crowsfoot", USER)
+
+    expect(result.erdRedraw).toBe("pending")
+    expect(mocks.renderDiagram).toHaveBeenCalledTimes(1)
+  })
+
+  it("chọn lại ký pháp đang dùng ⇒ không vẽ lại, erdRedraw = skipped", async () => {
+    existingErd("crowsfoot")
+
+    const result = await projectService.setErdNotation(PROJECT, ORG, "crowsfoot", USER)
+
+    expect(result.erdRedraw).toBe("skipped")
+    expect(mocks.renderDiagram).not.toHaveBeenCalled()
+  })
+
+  it("dự án chưa có hình ERD ⇒ bỏ qua renderDiagram, erdRedraw = skipped", async () => {
+    existingErd("chen")
+    mocks.getSpine.mockResolvedValue({ diagrams: [{ kind: "sequence" }] })
+
+    const result = await projectService.setErdNotation(PROJECT, ORG, "crowsfoot", USER)
+
+    expect(result.erdRedraw).toBe("skipped")
+    expect(mocks.renderDiagram).not.toHaveBeenCalled()
   })
 })

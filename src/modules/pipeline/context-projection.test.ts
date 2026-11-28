@@ -18,7 +18,7 @@ import type { Spine } from "../spine/spine.types.js"
 import { get } from "../spine/spine.repository.js"
 import { ChatSession } from "../project/chat-session.model.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
-import { ASSUMPTION_KEYS_READ, STEP_SKILLS, addendumForUnit, assumptionsForPrompt, componentLevelProjection, openAssumptionsFor, buildStepContext, getStepSpec, isScaleNote, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
+import { ASSUMPTION_KEYS_READ, SETTLED_NOTES_MAX, SETTLED_NOTE_CHARS, STEP_SKILLS, settledProjection, addendumForUnit, assumptionsForPrompt, componentLevelProjection, openAssumptionsFor, buildStepContext, getStepSpec, isScaleNote, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
 import { stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
 import { getStep, loadStepRegistry, orderedSteps } from "./step-registry.js"
 import { askableFields } from "./decisions.service.js"
@@ -37,6 +37,17 @@ describe("STEP_EXTRA_READS (P07)", () => {
     const empty = projectStep({ ...FIXTURE, project: { ...FIXTURE.project, release_scope: { in: [], out: [] } } }, "S-7.3")
     expect(empty.emptyFields.some((f) => f.includes("release_scope"))).toBe(false)
     expect(projectStep(FIXTURE, "S-7.1").projection).not.toHaveProperty("project.release_scope")
+  })
+
+  it("FLF-478: S-2.3 thấy nền tảng (form_factor), không đổi reads registry, không thêm field thiếu", () => {
+    const withMobile = { ...FIXTURE, project: { ...FIXTURE.project, form_factor: ["mobile_app", "web_app"] } } as unknown as Spine
+    const p = projectStep(withMobile, "S-2.3")
+    expect(p.projection["project.form_factor"]).toEqual(["mobile_app", "web_app"])
+    expect(getStepSpec("S-2.3").reads).not.toContain("project.form_factor")
+    const before = projectStep(FIXTURE, "S-2.3").emptyFields
+    const emptyFactor = projectStep({ ...FIXTURE, project: { ...FIXTURE.project, form_factor: [] } } as unknown as Spine, "S-2.3")
+    expect(emptyFactor.emptyFields).toEqual(before)
+    expect(projectStep(FIXTURE, "S-7.1").projection).not.toHaveProperty("project.form_factor")
   })
 })
 
@@ -77,7 +88,10 @@ describe("projectStep", () => {
     expect(p.writable).toEqual(["actors", "roles", "use_cases", "assumptions"])
     const targets = new Set(sectionsFedBy(FIXTURE, "S-3.5"))
     expect(targets).toEqual(new Set(["fixed:2.2.2"]))
-    expect(p.addendum.every((a) => targets.has(a.target_section))).toBe(true)
+    // FLF-472: ghi chú của mục bước nuôi đứng trước, các ghi chú còn lại (dữ kiện đã chốt) theo sau
+    const own = p.addendum.filter((a) => targets.has(a.target_section))
+    expect(p.addendum.slice(0, own.length)).toEqual(own)
+    expect(new Set(p.addendum.map((a) => a.id))).toEqual(new Set(FIXTURE.addendum.map((a) => a.id)))
   })
 
   it("S-5.4@S01 không chứa nfrs, glossary; chỉ màn/function/permission của S01", () => {
@@ -271,9 +285,64 @@ describe("addendumForUnit - lượt hỏi gộp / chat thấy điều user đã 
     }
   })
 
-  it("giai đoạn khác ⇒ không nạp (giữ như cũ)", () => {
-    expect(addendumForUnit(FIXTURE, "S-4")).toEqual([])
-    expect(addendumForUnit(FIXTURE, "S-5@S03")).toEqual([])
+  it("FLF-449: Draft của S-1 nhận thêm lời gốc `content`; step khác giữ `content_en` như cũ", () => {
+    const withContent = projectStep(FIXTURE, "S-1.4").addendum
+    expect(withContent).toEqual(FIXTURE.addendum.map(({ id, topic, target_section, content_en, content }) => (content ? { id, topic, target_section, content_en, content } : { id, topic, target_section, content_en })))
+    expect(withContent.some((a) => a.content)).toBe(true)
+    for (const stepId of ["B-1.3", "S-2.1", "S-3.1"]) {
+      expect(projectStep(FIXTURE, stepId).addendum.every((a) => !("content" in a)), stepId).toBe(true)
+    }
+  })
+
+  it("FLF-472: giai đoạn sau S-1 ⇒ khối Điều đã chốt (ghi chú Brief dạng gọn, cắt dòng, trần số dòng)", () => {
+    for (const unit of ["S-4", "S-5@S03", "S-6.2", "S-4.4"]) {
+      const notes = addendumForUnit(FIXTURE, unit)
+      expect(notes.map((a) => a.id), unit).toEqual(FIXTURE.addendum.map((a) => a.id))
+      expect(notes.every((a) => !("content" in a))).toBe(true)
+    }
+    const big = structuredClone(FIXTURE)
+    const base = big.addendum[0]
+    big.addendum = Array.from({ length: 80 }, (_, i) => ({ ...base, id: `AD${100 + i}`, content_en: "x".repeat(500) }))
+    const capped = addendumForUnit(big, "S-5@S01")
+    expect(capped).toHaveLength(SETTLED_NOTES_MAX)
+    expect(capped.every((a) => a.content_en.length <= SETTLED_NOTE_CHARS)).toBe(true)
+  })
+
+  it("FLF-472: dữ kiện ở ghi chú mục khác (15 phút / 4 giờ / 24h-2h / 10 năm) tới mọi step hỏi và soạn từ S-2", () => {
+    const s = structuredClone(FIXTURE)
+    const base = s.addendum[0]
+    s.addendum = [
+      ...s.addendum,
+      { ...base, id: "AD950", topic: "Giữ chỗ", target_section: "fixed:3.1.2", content: "Chưa cọc thì giữ chỗ 15 phút", content_en: "Unpaid slots are held for 15 minutes" },
+      { ...base, id: "AD951", topic: "Lưu hồ sơ", target_section: "fixed:1", content: "Giữ 10 năm, ẩn danh", content_en: "Keep records 10 years, anonymised" }
+    ]
+    s.business_rules = [...s.business_rules, { ...s.business_rules[0], id: "BR90", tier: "high", statement: "Huỷ dưới 4 giờ mất cọc" }]
+    for (const stepId of ["S-2.1", "S-2.2", "S-3.1", "S-4.4", "S-5.2@S01", "S-5.4@S01", "S-6.2", "S-7.3"]) {
+      expect(projectStep(s, stepId).addendum.map((a) => a.id), stepId).toEqual(expect.arrayContaining(["AD950", "AD951"]))
+    }
+    for (const stepId of ["S-4.4", "S-5.2@S01", "S-5.4@S01", "S-6.2", "S-6.5"]) {
+      const rules = projectStep(s, stepId).projection["business_rules[tier=high]:id,statement"] as { id: string }[]
+      expect(rules.map((r) => r.id), stepId).toContain("BR90")
+    }
+    expect(JSON.stringify(settledProjection(s))).toContain("BR90")
+    expect(addendumForUnit(s, "S-5@S01").map((a) => a.id)).toEqual(expect.arrayContaining(["AD950", "AD951"]))
+  })
+
+  it("FLF-472: token tăng thêm của khối Điều đã chốt (in ra để đo)", () => {
+    const s = structuredClone(FIXTURE)
+    const base = s.addendum[0]
+    // Dự án thật (Nha Khoa): ~40 ghi chú Brief, mỗi ghi chú ~25 từ; 12 quy tắc cấp cao
+    s.addendum = Array.from({ length: 40 }, (_, i) => ({ ...base, id: `AD${100 + i}`, target_section: "fixed:3.1.2", content_en: `Settled fact ${i}: ` + "patients get a reminder before the appointment and can cancel up to a fixed number of hours ahead".repeat(2) }))
+    const tokens = (x: unknown): number => Math.ceil(JSON.stringify(x).length / 4)
+    const measure = (stepId: string): { before: number; after: number } => {
+      const after = projectStep(s, stepId)
+      const fed = after.addendum.filter((a) => sectionsFedBy(s, stepId).includes(a.target_section))
+      return { before: tokens(fed) , after: tokens(after.addendum) + tokens(settledProjection(s)) }
+    }
+    const rows = ["S-4.4", "S-5.2@S01", "S-6.2"].map((id) => ({ id, ...measure(id) }))
+    process.stderr.write(`FLF-472 token ${JSON.stringify(rows)}
+`)
+    for (const r of rows) expect(r.after - r.before).toBeLessThan(4500)
   })
 })
 
@@ -376,10 +445,11 @@ describe("P05 - S-3 / S-4 thấy ý tưởng gốc của Brief (quy mô user nê
     const ids = projectStep(withCore(), "S-3.2").addendum.map((a) => a.id)
     expect(ids).toEqual(expect.arrayContaining(["AD900", "AD901"]))
     const loopStep = projectStep(withCore(), "S-5.2@S01").addendum.map((a) => a.id)
-    expect(loopStep).not.toContain("AD900")
+    // FLF-472: vòng màn cũng thấy ghi chú lõi như "Điều đã chốt", nhưng sau ghi chú của mục mình
+    expect(loopStep).toContain("AD900")
   })
 
-  it("E2E 17/11: ghi chú quy mô bị gán sang mục khác (3.1.2) vẫn tới S-3.2; ghi chú không nêu số thì không", () => {
+  it("E2E 17/11: ghi chú quy mô bị gán sang mục khác (3.1.2) vẫn tới S-3.2 (đứng trước); ghi chú không nêu số vẫn có nhưng đứng sau", () => {
     const s = withCore()
     const base = s.addendum[s.addendum.length - 1]
     s.addendum = [
@@ -389,7 +459,7 @@ describe("P05 - S-3 / S-4 thấy ý tưởng gốc của Brief (quy mô user nê
     ]
     const ids = projectStep(s, "S-3.2").addendum.map((a) => a.id)
     expect(ids).toContain("AD902")
-    expect(ids).not.toContain("AD903")
+    expect(ids.indexOf("AD902")).toBeLessThan(ids.indexOf("AD903"))
     expect(ids.filter((id) => id === "AD900")).toHaveLength(1)
   })
 

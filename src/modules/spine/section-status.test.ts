@@ -88,6 +88,31 @@ describe("computeSectionStates", () => {
     expect(isRerenderOnly({ path: "diagrams[id=D9]", before: { kind: "screen_layout", source_hash: "a" }, value: { kind: "screen_layout", source_hash: "b" } }), "bố cục màn").toBe(false)
   })
 
+  it("FLF-489 (P07 #2): chạy lại bước thông báo không làm mục chức năng cũ; riêng bố cục màn vẽ lại thì cũ (vì sao cần chặn vẽ lại tự động)", () => {
+    const spine = structuredClone(FIXTURE)
+    spine.diagrams.push({ ...FIXTURE.diagrams[0], id: "SEQ1", kind: "sequence", section: "function:FN001", owner_kind: null, owner_id: null })
+    const redraw = (seq: number, id: string, kind: string, section: string): Change => ({
+      ...change(seq, `diagrams[id=${id}]`, "S-7.3"),
+      before: { id, kind, section, source_hash: "h1" },
+      value: { id, kind, section, source_hash: "h2", rendered_at: "2026-11-17T00:00:00.000Z" }
+    })
+    // Sơ đồ tuần tự thuộc function:FN001 bị vẽ lại hộ (hash đổi) ở bước khác ⇒ mục chức năng vẫn accepted
+    expect(computeStatus(spine, [redraw(LAST_SEQ + 1, "SEQ1", "sequence", "function:FN001")], "function:FN001")).toBe("accepted")
+    // Đổi loại / ngữ cảnh thông báo ⇒ chỉ mục 5.3 đổi, mục chức năng không đổi
+    const states = new Map(
+      computeSectionStates(spine, [
+        change(LAST_SEQ + 1, "messages[id=MSG01].type", "S-7.3"),
+        change(LAST_SEQ + 2, "messages[id=MSG01].context", "S-7.3")
+      ]).map((s) => [s.id, s.status])
+    )
+    const feeding = computeSectionStates(spine, [change(LAST_SEQ + 1, "messages[id=MSG01].type", "S-4.1")]).map((s) => [s.id, s.status] as const)
+    expect(feeding.filter(([, st]) => st === "stale").map(([id]) => id), "chỉ mục 5.3 nhận change của messages").toEqual(["fixed:5.3"])
+    expect(states.get("function:FN001")).toBe("accepted")
+    expect(states.get("function:FN028")).toBe("accepted")
+    // Mockup màn vẽ lại ở bước khác thì mục chức năng cũ ⇒ BE phải không tự vẽ lại mockup lạc hậu từ trước
+    expect(computeStatus(spine, [redraw(LAST_SEQ + 3, "D05", "screen_layout", "function:FN028")], "function:FN028")).toBe("stale")
+  })
+
   it("FLF-431 (FAP #22): sửa sau mốc duyệt rồi hoàn tác ⇒ hết cũ; sửa TRƯỚC mốc rồi hoàn tác sau mốc ⇒ vẫn cũ", () => {
     const edit = change(LAST_SEQ + 1, "actors[id=A01].name")
     const undo = { ...change(LAST_SEQ + 2, "actors[id=A01].name"), op: "revert" as const, reason: `Revert seq ${LAST_SEQ + 1}` }

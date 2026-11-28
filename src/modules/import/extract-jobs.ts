@@ -14,7 +14,7 @@
 
 import { defineJob, isJobActive, startJob, waitForJob } from "../../shared/queue/job-runner.js"
 import { ImportedDocument, type IImportedDocument } from "./imported-document.model.js"
-import { acceptLatest, applyDropText, assertImportStatus, autoConfirmPendingMapping, requireImport } from "./import.service.js"
+import { acceptLatest, applyDropText, assertImportStatus, assertStartAffordable, autoConfirmPendingMapping, requireImport } from "./import.service.js"
 import { runExtraction } from "./extract.service.js"
 import { startAutoFinalize } from "./finalize-jobs.js"
 import { Mode1Error } from "./mode1.errors.js"
@@ -76,7 +76,18 @@ export const startExtraction = async (projectId: string, userId: string, importI
   await autoConfirmPendingMapping(doc)
   assertImportStatus(doc, ["extracting"], "extracting")
   // FLF-412: vùng Bỏ chữ ⇒ viết lại file + tách lại trước lượt đọc đầu tiên
-  if (!(await isExtractionRunning(importId))) await applyDropText(doc)
+  if (!(await isExtractionRunning(importId))) {
+    // FLF-458: đủ credit cho tài liệu tham khảo + dịch khung rồi mới viết lại file (thiếu ⇒ 402, chưa ghi / trừ gì)
+    await assertStartAffordable(doc, userId)
+    // Đọc tài liệu tham khảo (AI chậm) TRƯỚC khi viết lại file: sau applyDropText không còn lệnh chậm nào trước job I-4, nên lựa chọn Bỏ chữ / nhãn không chen vào được
+    // FLF-458: tài liệu tham khảo đang chờ đọc cùng lượt Bắt đầu (credit đã cộng vào màn báo); lỗi khác credit không chặn
+    const { summarizePendingAtStart } = await import("../project/project-document.service.js")
+    await summarizePendingAtStart(projectId, userId).catch((err) => {
+      if ((err as { code?: string })?.code === "INSUFFICIENT_CREDIT") throw err
+      console.warn(`[I-4] Không đọc được tài liệu tham khảo của dự án ${projectId}:`, err)
+    })
+    await applyDropText(doc, userId)
+  }
   // Bỏ `paused` trước khi trả lời để lần poll đầu không thấy trạng thái dừng cũ.
   const started = await startJob(
     extractJob,
@@ -93,20 +104,21 @@ export const startExtraction = async (projectId: string, userId: string, importI
 }
 
 /**
- * Người dùng bấm Dừng lúc đang đọc nội dung: đặt `paused: user` (chỉ khi `extracting` và chưa dừng). Job đang chạy thấy cờ
+ * Người dùng bấm Dừng lúc đang đọc nội dung hoặc kiểm tra AI: đặt `paused: user` (chỉ khi `extracting` / `checking` và chưa dừng). Job đang chạy thấy cờ
  * trước lượt AI kế tiếp và dừng (`runExtraction` → `userStopRequested`) — lượt đang gọi dở vẫn chạy xong (đã giữ credit),
  * không gọi thêm lượt nào. Đã dừng (bất kỳ lý do) ⇒ trả nguyên trạng. Chưa bấm Bắt đầu ⇒ không có gì để dừng.
  * Tiếp tục bằng `/import/resume` như mọi lý do dừng khác (đi tiếp từ `extract_cursor` + `partial`).
  */
 export const requestStop = async (projectId: string, importId: string): Promise<IImportedDocument> => {
   const doc = await requireImport(projectId, importId)
-  assertImportStatus(doc, ["extracting"], "extracting")
+  assertImportStatus(doc, ["extracting", "checking"], "extracting")
   if (doc.paused) return doc
-  if (!doc.extract_cursor && !(await isExtractionRunning(importId))) {
+  // FLF-454: bước kiểm tra AI (1.9) cũng dừng được; `check` đọc cờ trước mỗi lô / lượt kiểm chéo
+  if (doc.status === "extracting" && !doc.extract_cursor && !(await isExtractionRunning(importId))) {
     throw new Mode1Error("IMPORT_INVALID_STATE", "Lượt đọc file chưa bắt đầu nên không có gì để dừng", { status: doc.status, to: doc.status, allowed: ["extracting"] })
   }
   const paused = { reason: "user" as const, at: new Date() }
-  await ImportedDocument.updateOne({ _id: importId, status: "extracting", paused: null }, { $set: { paused } })
+  await ImportedDocument.updateOne({ _id: importId, status: doc.status, paused: null }, { $set: { paused } })
   return (await ImportedDocument.findById(importId)) ?? doc
 }
 

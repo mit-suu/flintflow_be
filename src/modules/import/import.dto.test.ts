@@ -72,6 +72,13 @@ describe("import.dto - request", () => {
     expect(parsed.fields).toHaveLength(2)
   })
 
+  it("FLF-462 (bước 1.6): guidance / content_mismatch - xác nhận lớp 4 chữ hướng dẫn và mục tên đúng nội dung sai", () => {
+    expect(fieldsPatchRequestSchema.safeParse({ import_id: IMPORT_ID, guidance: [{ section_id: "fixed:3.4", block_id: "B0042", is_guidance: true }] }).success).toBe(true)
+    expect(fieldsPatchRequestSchema.safeParse({ import_id: IMPORT_ID, content_mismatch: [{ section_id: "fixed:2.2.2" }] }).success).toBe(true)
+    // Không có fields / guidance / content_mismatch nào và không confirm_all ⇒ lỗi (giống rule cũ của fields)
+    expect(fieldsPatchRequestSchema.safeParse({ import_id: IMPORT_ID, fields: [], guidance: [], content_mismatch: [] }).success).toBe(false)
+  })
+
   it("finalize ghi Spine nên bắt buộc base_version ≥ 1", () => {
     expect(finalizeRequestSchema.safeParse({ import_id: IMPORT_ID }).success).toBe(false)
     expect(finalizeRequestSchema.safeParse({ import_id: IMPORT_ID, base_version: 0 }).success).toBe(false)
@@ -108,12 +115,12 @@ describe("import.dto - response", () => {
   })
 
   it("GET /import khi chưa upload: import = null", () => {
-    const empty = { import: null, profile: null, extraction: { sections: [], review_fields: [] }, blocks_count: 0 }
+    const empty = { import: null, profile: null, extraction: { sections: [], review_fields: [], review_guidance: [], review_content_mismatch: [] }, blocks_count: 0 }
     expect(getImportResponseSchema.safeParse(empty).success).toBe(true)
   })
 
   it("GET /import: credit_estimate tuỳ chọn, nullable; available_credits null với Viewer", () => {
-    const empty = { import: null, profile: null, extraction: { sections: [], review_fields: [] }, blocks_count: 0 }
+    const empty = { import: null, profile: null, extraction: { sections: [], review_fields: [], review_guidance: [], review_content_mismatch: [] }, blocks_count: 0 }
     const estimate = { text_batches: 8, diagram_images: 1, ai_calls: 9, credits: 18, available_credits: 300 }
     expect(getImportResponseSchema.safeParse({ ...empty, credit_estimate: estimate }).success).toBe(true)
     expect(getImportResponseSchema.safeParse({ ...empty, credit_estimate: { ...estimate, available_credits: null } }).success).toBe(true)
@@ -176,7 +183,15 @@ describe("import.dto - response", () => {
       against_version: "0.1",
       created_at: AT,
       summary: { added: 1, removed: 0, modified: 1, moved: 0 },
-      blocks: [{ block_id: null, change: "added", after: "New paragraph" }, { block_id: "B0007", change: "modified", before: "a", after: "b" }]
+      blocks: [{ block_id: null, change: "added", after: "New paragraph" }, { block_id: "B0007", change: "modified", before: "a", after: "b" }],
+      sections: [],
+      // FLF-457
+      before_baseline: false,
+      no_stamp: false,
+      heading_match: 1,
+      suggest_reference: false,
+      stale: null,
+      markup: [{ kind: "comment", author: "Lan", text: "Check this", section: "1 Introduction", location: { block_ord: 3, text: "Purpose" } }]
     }
     expect(reuploadDiffDtoSchema.safeParse(diff).success).toBe(true)
   })
@@ -233,7 +248,7 @@ describe("FLF-343 - import một mạch", () => {
   })
 
   it("credit_estimate có check_calls; heading_map / table_map có auto_confirmed; detector mới (toc, numbering, format)", () => {
-    const empty = { import: null, profile: null, extraction: { sections: [], review_fields: [] }, blocks_count: 0 }
+    const empty = { import: null, profile: null, extraction: { sections: [], review_fields: [], review_guidance: [], review_content_mismatch: [] }, blocks_count: 0 }
     const estimate = { text_batches: 8, diagram_images: 1, check_calls: 3, ai_calls: 12, credits: 27, available_credits: 300 }
     expect(getImportResponseSchema.safeParse({ ...empty, credit_estimate: estimate }).success).toBe(true)
     for (const detected_by of ["toc", "numbering", "format"]) {

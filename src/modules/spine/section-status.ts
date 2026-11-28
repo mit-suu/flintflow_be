@@ -16,7 +16,7 @@
 
 import type { Change, Spine } from "./spine.types.js"
 import { listSections, sectionsOfPath, stepsOf } from "./section-registry.js"
-import { isRegisteredStep } from "../pipeline/step-registry.js"
+import { isRegisteredStep, loadStepRegistry, parseStepId } from "../pipeline/step-registry.js"
 
 export type SectionStatus = "derived" | "stale" | "accepted" | "draft"
 
@@ -200,9 +200,52 @@ export const readiness = (spine: Spine, changes: ChangeLike[], states = computeS
 
 /** Phases §6.4: 12 Brief + 38 SRS cố định. */
 export const FIXED_STEP_COUNT = 50
+/** Số step vòng màn của mẫu ĐẦY ĐỦ (FlintFlow chuẩn). Cấu trúc đích thiếu mục thì dùng `stepsPerScreen(profile)`. */
 export const STEPS_PER_SCREEN_LOOP = 5
 /** N chốt ở S-4.1 (Phases §1.1). */
 export const N_LOCKED_AT_STEP = "S-4.1"
+
+/**
+ * Cấu trúc đích của vòng màn (FLF-466 P08): template step vòng S-5 KHÔNG áp dụng cho mẫu của dự án (vd mẫu không có
+ * Screen Layout ⇒ bỏ S-5.3). Rỗng ⇒ mẫu chuẩn, đủ step.
+ */
+export interface ScreenLoopProfile {
+  skippedTemplates: ReadonlySet<string>
+}
+
+export const FULL_SCREEN_LOOP: ScreenLoopProfile = { skippedTemplates: new Set() }
+
+const loopTemplateIds = (): string[] => loadStepRegistry().filter((s) => s.kind === "loop").map((s) => s.id)
+
+export interface TemplateLoopHint {
+  step_plan?: readonly { step_id: string; state: string }[] | null
+}
+
+/**
+ * Suy profile từ Spine + `TemplateProfile.step_plan`: template vòng S-5 mà mẫu không có mục để soạn (`step_plan` đánh dấu
+ * `hidden`, hoặc mọi step đã có `S-5.n@<màn>` đều `skipped`). Nhờ đọc cả `step_plan`, lúc ở B-2.3 và S-4.1 (chưa sinh
+ * `S-5.n@<màn>`) vẫn đếm đúng 4 bước/màn cho mẫu không có Screen Layout (FLF-466 P08).
+ */
+export const screenLoopProfile = (spine: Pick<Spine, "steps">, templateProfile?: TemplateLoopHint | null): ScreenLoopProfile => {
+  const loopIds = new Set(loopTemplateIds())
+  const byTemplate = new Map<string, boolean>()
+  for (const step of spine.steps) {
+    const { base, loop } = parseStepId(step.id)
+    if (loop === null) continue
+    byTemplate.set(base, (byTemplate.get(base) ?? true) && step.status === "skipped")
+  }
+  const skipped = new Set([...byTemplate].filter(([, allSkipped]) => allSkipped).map(([id]) => id))
+  for (const item of templateProfile?.step_plan ?? []) {
+    if (item.state === "hidden" && loopIds.has(item.step_id)) skipped.add(item.step_id)
+  }
+  return { skippedTemplates: skipped }
+}
+
+/** Template vòng màn áp dụng cho mẫu đích (theo thứ tự registry). */
+export const loopTemplatesOf = (profile: ScreenLoopProfile = FULL_SCREEN_LOOP): string[] => loopTemplateIds().filter((id) => !profile.skippedTemplates.has(id))
+
+/** Số step mỗi màn theo cấu trúc đích: 5 với mẫu chuẩn, 4 khi mẫu không có Screen Layout. */
+export const stepsPerScreen = (profile: ScreenLoopProfile = FULL_SCREEN_LOOP): number => loopTemplatesOf(profile).length
 
 export interface StepProgress {
   done: number

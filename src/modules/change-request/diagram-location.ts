@@ -8,7 +8,7 @@
 
 import { planTransaction } from "../spine/op-engine.js"
 import { userOpSchema, type Op } from "../spine/op.types.js"
-import { ORIGINAL_DIAGRAM_LABELS, isOriginalStale, originalDiagramOf } from "../spine/original-diagram.js"
+import { ORIGINAL_DIAGRAM_LABELS, isOriginalStale, originalDiagramHash, originalDiagramOf } from "../spine/original-diagram.js"
 import type { CustomBlock, CustomSection, Spine } from "../spine/spine.types.js"
 import type { IChangeLocation, LocationProposal } from "./change-location.model.js"
 import { elementValue, valueText } from "./spine-location.js"
@@ -62,6 +62,10 @@ const spineAfter = (spine: Spine, groups: Op[][]): Spine => {
   return current
 }
 
+/** Spine sau đề xuất của các vị trí (không kể vị trí sơ đồ gốc) trong CR — chạy khô, dùng chung cho kết luận và hình xem trước. */
+export const spineAfterCr = (spine: Spine, locations: readonly Pick<IChangeLocation, "path" | "conclusion" | "proposal" | "found_by">[]): Spine =>
+  spineAfter(spine, otherEditOps(locations))
+
 /**
  * Kết luận cho một vị trí sơ đồ gốc: hình nào lệch dữ liệu sau CR ⇒ `edit` bỏ đúng khối ảnh đó khỏi phần nối; không hình
  * nào lệch ⇒ `not_related`. Phần nối không còn ⇒ `null` (C-5 báo `element_missing`).
@@ -73,7 +77,7 @@ export const redrawDecision = (
 ): RedrawDecision | null => {
   const custom = elementValue(spine, path) as CustomSection | undefined
   if (!custom) return null
-  const after = spineAfter(spine, otherEditOps(locations))
+  const after = spineAfterCr(spine, locations)
   const stale = new Set(custom.blocks.filter((b) => {
     const d = originalDiagramOf(b)
     return !!d && isOriginalStale(after, d)
@@ -109,6 +113,53 @@ export const redrawDecision = (
     }
   }
 }
+
+/**
+ * C-3: vị trí sơ đồ gốc chỉ là ứng viên theo mảng dữ liệu (CR chạm bất kỳ use case nào ⇒ cả sơ đồ ngữ cảnh, use case, luồng
+ * màn). CR mang sẵn op (bản xem trước / lô đã duyệt) ⇒ biết trước dữ liệu sau CR: bỏ ngay ứng viên chỉ-sơ-đồ mà không hình
+ * nào của nó đổi hash, người dùng không phải xem và bấm từng hình không liên quan. Op không áp được ⇒ giữ nguyên danh sách
+ * (C-4 vẫn so hash như cũ). Vị trí đã được tìm theo đường khác (`found_by` có thêm nguồn) luôn giữ.
+ */
+export const narrowDiagramCandidates = <T extends Pick<IChangeLocation, "path" | "found_by">>(spine: Spine, found: readonly T[], seedOps: readonly unknown[] | undefined): T[] => {
+  const ops = (seedOps ?? []).flatMap((raw) => {
+    const parsed = userOpSchema.safeParse(raw)
+    return parsed.success ? [parsed.data] : []
+  })
+  if (!ops.length) return [...found]
+  const after = tryApply(spine, ops)
+  if (!after) return [...found]
+  return found.filter((f) => {
+    if (!(f.found_by.length === 1 && isDiagramLocation(f))) return true
+    const custom = elementValue(spine, f.path) as CustomSection | undefined
+    if (!custom) return true
+    return custom.blocks.some((b) => {
+      const d = originalDiagramOf(b)
+      return !!d && isOriginalStale(after, d)
+    })
+  })
+}
+
+/**
+ * "Giữ hình gốc" (người dùng tự chọn `not_related` ở vị trí sơ đồ gốc) — lúc ghi CR: hình được người dùng xác nhận là vẫn
+ * dùng được cho dữ liệu SAU CR ⇒ đóng dấu `source_hash` của khối ảnh theo dữ liệu đó (ảnh, chú thích giữ nguyên). Không có
+ * bước này thì cờ vàng `original_diagram_stale` bật ngay sau khi ghi và mời tạo CR vẽ lại đúng hình vừa chọn giữ; có bước này
+ * thì cờ chỉ bật lại khi dữ liệu đổi tiếp. `spine` = Spine sau CR (chạy khô).
+ */
+export const keptOriginalAckOps = (spine: Spine, locations: readonly Pick<IChangeLocation, "path" | "conclusion" | "manual" | "found_by">[]): Op[] =>
+  locations
+    .filter((l) => isDiagramLocation(l) && l.manual && l.conclusion === "not_related")
+    .flatMap((l): Op[] => {
+      const custom = elementValue(spine, l.path) as CustomSection | undefined
+      if (!custom) return []
+      let changed = false
+      const blocks = custom.blocks.map((b): CustomBlock => {
+        const d = originalDiagramOf(b)
+        if (!d || !isOriginalStale(spine, d)) return b
+        changed = true
+        return { ...b, diagram: { ...d, source_hash: originalDiagramHash(spine, d.kind, d.owner_id ?? null) } }
+      })
+      return changed ? [{ op: "set", path: `${l.path}.blocks`, value: blocks, reason: "Giữ hình gốc của tài liệu theo quyết định của người duyệt" }] : []
+    })
 
 /**
  * Ghi kết luận cho mọi vị trí sơ đồ gốc của CR (bỏ qua vị trí người dùng đã tự quyết — `manual`). Gọi sau khi các vị trí

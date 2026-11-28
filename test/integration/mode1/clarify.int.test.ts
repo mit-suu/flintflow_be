@@ -31,7 +31,7 @@ describe("C-2 mơ hồ ⇒ câu hỏi; trả lời ⇒ gọi lại", () => {
     const crId = await newCr(c, "Change the login", "AMBIGUOUS-CR: change UC-02 somehow.")
     const asked = detail(await c.post(`/change-requests/${crId}/clarify`))
     expect(asked.change_request.status).toBe("awaiting_answers")
-    expect(asked.change_request.clarifications).toEqual([{ round: 1, questions: ["Which screen?"], answers: [], suggestions: [[]] }])  // model không gợi ý ⇒ [] cho từng câu
+    expect(asked.change_request.clarifications).toEqual([{ round: 1, questions: ["Which screen?"], answers: [], suggestions: [[]], kinds: ["ambiguous"] }])  // model không gợi ý ⇒ [] cho từng câu
     expect(asked.pending_questions).toEqual(["Which screen?"])
     const [prompt] = promptsOf("# CR Clarify")
     expect(prompt).toContain("Round 1 of at most 3")
@@ -160,6 +160,8 @@ describe("C-2 lỗi và biên", () => {
     detail(await c.post(`/change-requests/${crId}/clarify`))
     await expect(answerClarification(await crDoc(projectId, crId), seeded.userId, [])).rejects.toMatchObject({ statusCode: 400 })
 
+    // Mỗi người một CR mở một lúc ⇒ huỷ CR vừa hỏi trước khi tạo CR kế
+    detail(await c.post(`/change-requests/${crId}/cancel`, { reason: "Chỉ để thử CR kế tiếp" }))
     const other = await newCr(c)
     await Spine.deleteOne({ projectId })
     await expect(runClarify(await crDoc(projectId, other), seeded.userId)).rejects.toMatchObject({ statusCode: 404 })
@@ -181,8 +183,8 @@ describe("C-2 lỗi và biên", () => {
     const done = detail(await c.post(`${cr}/answers`, { answers: ["A-c"] }))
     expect(done.change_request.status).toBe("impact_review")
     expect(done.change_request.clarifications).toEqual([
-      { round: 1, questions: ["Q-a?", "Q-b?"], answers: ["A-a", "A-b"], suggestions: [[], []] },
-      { round: 2, questions: ["Q-c?"], answers: ["A-c"], suggestions: [[]] }
+      { round: 1, questions: ["Q-a?", "Q-b?"], answers: ["A-a", "A-b"], suggestions: [[], []], kinds: ["ambiguous", "ambiguous"] },
+      { round: 2, questions: ["Q-c?"], answers: ["A-c"], suggestions: [[]], kinds: ["ambiguous"] }
     ])
   })
 })
@@ -224,7 +226,7 @@ describe("FLF-367 C-2: CR mâu thuẫn với tài liệu ⇒ hỏi người dùn
     expect(d.pending_questions).toHaveLength(1)
     expect(d.pending_questions[0]).toContain("3 lần")
     expect(d.pending_questions[0]).toContain(LOCK_PASSAGE)
-    expect(d.change_request.clarifications[0].suggestions).toEqual([[...CONTRADICTION_CHOICES]])
+    expect(d.change_request.clarifications[0].suggestions).toEqual([[...CONTRADICTION_CHOICES.vi]])
     const [prompt] = promptsOf("# CR Clarify")
     // tài liệu vừa ngân sách ⇒ gửi mọi đoạn văn giữ nguyên (không lọc theo từ chung); đoạn "5 lần" có đủ câu
     expect(prompt).toContain("Related passages of the document kept verbatim (not in the structured data above):\n")

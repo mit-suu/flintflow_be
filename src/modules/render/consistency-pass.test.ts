@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { Spine } from "../spine/spine.types.js"
 import type { RenderedSection } from "./rendered-document.types.js"
-import { CONSISTENCY_LLM_ENABLED, runConsistencyPass } from "./consistency-pass.js"
+import { runConsistencyPass } from "./consistency-pass.js"
 
 const emptySpine = (): Spine => ({
   project: { name: "Demo", system_name: null, vision: null, goals: [], type: null, domain: null, complexity: null, form_factor: [], stakes: null, working_mode: null, review_mode: "balanced", skip_confirm_sections: [] as const, release_scope: { in: [], out: [] } },
@@ -78,8 +78,17 @@ describe("runConsistencyPass - tất định", () => {
     expect(await runConsistencyPass(emptySpine(), [section({})])).toEqual([])
   })
 
-  it("mặc định CONSISTENCY_LLM_ENABLED = false (không gọi model)", () => {
-    expect(CONSISTENCY_LLM_ENABLED).toBe(false)
+  it("FLF-449: không đọc cờ env và không gọi model — chỉ kết quả tất định, kể cả khi CONSISTENCY_LLM_ENABLED bật", async () => {
+    const previous = process.env.CONSISTENCY_LLM_ENABLED
+    process.env.CONSISTENCY_LLM_ENABLED = "true"
+    try {
+      const sections = [section({ blocks: [{ type: "paragraph", runs: [{ text: "Uses HTTPS for delivery." }] }] })]
+      const findings = await runConsistencyPass(emptySpine(), sections)
+      expect(findings.every((f) => ["dead_reference", "duplicate_section_number", "undefined_term"].includes(f.rule))).toBe(true)
+    } finally {
+      if (previous === undefined) delete process.env.CONSISTENCY_LLM_ENABLED
+      else process.env.CONSISTENCY_LLM_ENABLED = previous
+    }
   })
 })
 

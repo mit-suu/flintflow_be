@@ -8,6 +8,7 @@ import {
   canonicalFieldIds,
   collectEntities,
   compactKey,
+  entityKey,
   fieldPath,
   findKnownCompact,
   findKnownId,
@@ -25,7 +26,7 @@ import {
 } from "./extracted-entities.js"
 import { findingOps } from "./check.service.js"
 import { MODE1_RULE_PROFILE } from "./mode1-rule-profile.js"
-import { buildImportOps, droppedPermissionFindings, relationPhrase, ruleTierOfSections, splitSubtitleComponents, type BuiltEntity, type DroppedPermission } from "./spine-builder.js"
+import { buildImportOps, commonCategoryOf, droppedPermissionFindings, priorityOf, relationPhrase, ruleTierOfSections, splitSubtitleComponents, unmappedPriorityFindings, type BuiltEntity, type DroppedPermission, type UnmappedPriority } from "./spine-builder.js"
 import { buildLayoutSections } from "../render/layout-sections.js"
 
 describe("extracted-entities", () => {
@@ -100,6 +101,20 @@ describe("extracted-entities", () => {
     expect(new IdAllocator({ functions: ["FR-3.2.1"] }).next("functions")).toBe("FR-01")
   })
 
+  it("FLF-476 entityKey: bỏ tiền tố riêng của loại phần tử - mã bảng trơn '02' = mã chữ 'UC-02' của CÙNG loại; không đụng tiền tố loại khác", () => {
+    expect(entityKey("use_cases", "UC-02")).toBe(entityKey("use_cases", "02"))
+    expect(entityKey("use_cases", "UC02")).toBe(entityKey("use_cases", "02"))
+    // Tiền tố của loại KHÁC (business_rules "BR-") không bị entityKey("use_cases", ...) bỏ ⇒ vẫn khác "02"
+    expect(entityKey("use_cases", "BR-02")).not.toBe(entityKey("use_cases", "02"))
+    // findKnownKey: khoá AI "UC-02" khớp mã bảng "02" đã biết (EduCampus B6)
+    const known: EntityItem[] = [{ entity: "use_cases", id: "02", value: { name: "Log in" }, confidence: 1, field_confidence: {}, source_block_ids: [], origin: "deterministic" }]
+    expect(findKnownKey(known, "use_cases", "UC-02")).toBe("02")
+    // IdAllocator: đã giữ "02" thì "UC-02" bị coi là trùng (has = true), không cấp mã mới chồng lên
+    const alloc = new IdAllocator({ use_cases: ["02"] })
+    expect(alloc.has("use_cases", "UC-02")).toBe(true)
+    expect(alloc.has("use_cases", "UC-03")).toBe(false)
+  })
+
   it("FLF-252 aiItemId: khoá model chép từ known_keys khớp mã đã biết dù khác dạng; khoá là tên ⇒ như không có khoá", () => {
     const item = (entity: string, id: string, name: string): EntityItem => ({ entity, id, value: { name }, confidence: 1, field_confidence: {}, source_block_ids: [], origin: "deterministic" })
     const known = [item("actors", "A01", "Developer"), item("actors", "A02", "Admin"), item("entities", "E02", "repositories"), item("use_cases", "UC-02", "Log in")]
@@ -152,6 +167,23 @@ describe("FLF-361 giữ định dạng mã của tài liệu", () => {
     const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
     expect(plan.spine.actors.map((a) => a.id)).toEqual(["A01"])
     expect(plan.spine.use_cases.map((u) => [u.id, u.actor_ids])).toEqual([["UC01", ["A01"]]])
+  })
+
+  it("FLF-476: cách viết của BẢNG thắng chữ dù đứng sau trong tài liệu (đoạn 2.2.1 'UC-02' trước bảng 2.2.2 '02')", () => {
+    const fields = canonicalFieldIds([
+      // Đoạn chữ (AI) nhắc "UC-02" đứng TRƯỚC trong mảng field (đúng thứ tự tài liệu: 2.2.1 trước 2.2.2)
+      { path: "use_cases[id=UC-02].name", value: "Log in", origin: "ai" as const },
+      // Bảng (deterministic) ghi "02" đứng SAU — vẫn phải thắng, không giữ "UC-02" của chữ
+      { path: "use_cases[id=02].name", value: "Log in", origin: "deterministic" as const },
+      { path: "use_cases[id=02].actor_ids", value: ["A01"], origin: "deterministic" as const }
+    ])
+    expect(fields.map((f) => f.path)).toEqual(["use_cases[id=02].name", "use_cases[id=02].name", "use_cases[id=02].actor_ids"])
+    // Không có field nào từ bảng (mọi field đều "ai"/"vision") ⇒ vẫn giữ cách viết gặp đầu tiên như cũ
+    const noTable = canonicalFieldIds([
+      { path: "use_cases[id=UC-02].name", value: "Log in", origin: "ai" as const },
+      { path: "use_cases[id=02].actor_ids", value: ["A01"], origin: "ai" as const }
+    ])
+    expect(noTable.map((f) => f.path)).toEqual(["use_cases[id=UC-02].name", "use_cases[id=UC-02].actor_ids"])
   })
 })
 
@@ -245,6 +277,39 @@ describe("buildImportOps", () => {
       ["F-03", "General"]
     ])
     expect(plan.spine.screens[0].feature_id).toBe("F-03")
+  })
+
+  it("FLF-476: tên nhóm dự phòng theo ngôn ngữ tài liệu - 'General' (en, mặc định) / 'Chức năng khác' (vi)", () => {
+    const spine = createEmptySpine({ name: "Lumen" })
+    const screen = { entity: "screens" as const, id: "SCR-01", value: { name: "Home" } }
+    const en = planTransaction(
+      spine,
+      { base_version: spine.spine_version, ops: buildImportOps(spine, [screen], undefined, undefined, { language: "en" }), by: "import" },
+      { startSeq: 1 }
+    )
+    expect(en.spine.features.map((f) => f.name)).toEqual(["General"])
+    const vi = planTransaction(
+      spine,
+      { base_version: spine.spine_version, ops: buildImportOps(spine, [screen], undefined, undefined, { language: "vi" }), by: "import" },
+      { startSeq: 1 }
+    )
+    expect(vi.spine.features.map((f) => f.name)).toEqual(["Chức năng khác"])
+    // Không truyền ngôn ngữ (mặc định) ⇒ như cũ, "General"
+    const def = planTransaction(spine, { base_version: spine.spine_version, ops: buildImportOps(spine, [screen]), by: "import" }, { startSeq: 1 })
+    expect(def.spine.features.map((f) => f.name)).toEqual(["General"])
+  })
+
+  it("FLF-476: resolveUseCase (tham chiếu includes/extends) bỏ tiền tố riêng của loại - 'UC-02' ra đúng use case '02' của bảng", () => {
+    const spine = createEmptySpine({ name: "Lumen" })
+    const ops = buildImportOps(spine, [
+      { entity: "use_cases", id: "02", value: { name: "Log in" } },
+      { entity: "use_cases", id: "01", value: { name: "Register", includes: ["UC-02"] } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.use_cases.map((u) => [u.id, u.includes])).toEqual([
+      ["02", []],
+      ["01", ["02"]]
+    ])
   })
 
   it("FLF-252: cột Feature ghi tính năng mục 3 không có heading ⇒ tính năng theo đúng tên; ghi gọn / thêm hậu tố tên heading ⇒ heading đó; ô trống / mã lạ ⇒ General", () => {
@@ -826,5 +891,56 @@ describe("dropReciprocalRelations - mỗi cặp quan hệ một chiều (QLHS 11
     expect(rel.E06).toEqual([])
     expect(rel.E20).toEqual(["E21"])
     expect(rel.E21).toEqual(["E20"])
+  })
+})
+
+describe("bug #1 FLF-447: mức ưu tiên theo thang của file", () => {
+  it("Cao / Trung bình / Thấp, High / Medium / Low (bỏ dấu, không phân biệt hoa thường) ⇒ MoSCoW", () => {
+    expect(["Cao", "CAO", "cao ", "High", "Trung bình", "trung binh", "MEDIUM", "Thấp", "low", "Must", "won't"].map(priorityOf))
+      .toEqual(["must", "must", "must", "must", "should", "should", "should", "could", "could", "must", "wont"])
+    expect(priorityOf("")).toBeNull()
+    expect(priorityOf(null)).toBeNull()
+    expect(priorityOf("Khẩn")).toBeUndefined()
+    expect(priorityOf("constructor")).toBeUndefined()
+  })
+
+  it("NFR / chức năng: ô map được vào Spine; ô lạ không bỏ im lặng mà thành cờ Cần xem", () => {
+    const spine = createEmptySpine()
+    const unmapped: UnmappedPriority[] = []
+    const ops = buildImportOps(spine, [
+      { entity: "nfrs", id: "NFR-01", value: { statement: "Trang tải dưới 2 giây", category: "performance", priority: "Cao" }, sections: ["fixed:4.2.3"] },
+      { entity: "nfrs", id: "NFR-02", value: { statement: "Chịu 1000 người dùng", category: "performance", priority: "Trung bình" }, sections: ["fixed:4.2.3"] },
+      { entity: "nfrs", id: "NFR-03", value: { statement: "Sao lưu hằng ngày", category: "performance", priority: "Khẩn" }, sections: ["fixed:4.2.3"] },
+      { entity: "nfrs", id: "NFR-04", value: { statement: "Không ghi ưu tiên", category: "performance" }, sections: ["fixed:4.2.3"] }
+    ], [], unmapped)
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.nfrs.map((n) => n.priority)).toEqual(["must", "should", null, null])
+    expect(unmapped).toEqual([{ entity: "nfrs", id: "NFR-03", value: "Khẩn", sections: ["fixed:4.2.3"] }])
+    const [finding] = unmappedPriorityFindings(unmapped)
+    expect(finding).toMatchObject({ rule: "needs_review", section_id: "fixed:4.2.3", target_id: "nfrs[id=NFR-03].priority" })
+    expect(finding.message).toContain('"Khẩn"')
+    const flagOps = findingOps(plan.spine, [finding], "import_needs_review")
+    expect(flagOps).toHaveLength(1)
+    expect(flagOps[0].value).toMatchObject({ rule_id: "import_needs_review", section_id: "fixed:4.2.3", target_id: "nfrs[id=NFR-03].priority" })
+  })
+})
+
+describe("bug #3 FLF-447: loại yêu cầu chung lưu theo khoá", () => {
+  it("nhãn tự do ⇒ khoá; không nhận ra ⇒ suy từ phần nhỏ nguồn, không có thì giữ chữ của file", () => {
+    expect(commonCategoryOf("Bảo mật")).toBe("security")
+    expect(commonCategoryOf("BẢO MẬT", ["slot:localization"])).toBe("security")
+    expect(commonCategoryOf("Mật khẩu", ["slot:security"])).toBe("security")
+    expect(commonCategoryOf("Mật khẩu", ["fixed:5.2"])).toBe("Mật khẩu")
+    expect(commonCategoryOf("", [])).toBe("General")
+  })
+
+  it("buildImportOps ghi khoá vào Spine", () => {
+    const spine = createEmptySpine()
+    const ops = buildImportOps(spine, [
+      { entity: "common_requirements", id: "COM-01", value: { category: "Bảo mật", statement: "Mật khẩu băm bằng Argon2" }, sections: ["slot:security"] },
+      { entity: "common_requirements", id: "COM-02", value: { category: "Phiên làm việc", statement: "Hết phiên sau 30 phút" }, sections: ["slot:security"] }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.common_requirements.map((c) => c.category)).toEqual(["security", "session"])
   })
 })

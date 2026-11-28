@@ -21,9 +21,9 @@ import request from "supertest"
 import app from "../../../src/app.js"
 import { authAs, seedFixture, type SeededFixture } from "../../setup.js"
 import { crToReady, importedProject, resetCrMock } from "../../helpers/mode1-cr-p4.js"
-import { createMode1Project } from "../../helpers/mode1.js"
+import { createMode1Project, saveTemplateProposal } from "../../helpers/mode1.js"
 import { mockOverrides } from "../../helpers/mock-llm.js"
-import { fileOf } from "../../helpers/mode1-import-p4.js"
+import { fileOf, runExtraction } from "../../helpers/mode1-import-p4.js"
 import { mockTranslateItems } from "../../../src/shared/ai/providers/mock.provider.js"
 import { makeDocx, p, styled } from "../../../src/modules/docx-ooxml/testing/make-docx.js"
 import { makeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
@@ -33,7 +33,6 @@ import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.j
 import { release } from "../../../src/modules/doc-version/release.service.js"
 import { convertedLanguages } from "../../../src/modules/doc-version/render-version.js"
 import { acceptLatest, uploadImport } from "../../../src/modules/import/import.service.js"
-import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { finalizeImport } from "../../../src/modules/import/finalize.service.js"
 import { OrgTemplateVersion } from "../../../src/modules/import/org-library.model.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
@@ -94,10 +93,10 @@ type Choose = (id: string, choices: string[], aiChoices: string[]) => string | u
 const decide = async (token: string, projectId: string, id: string, choose?: Choose): Promise<MigrationDto> => {
   const dto = (await request(app).get(url(projectId, id)).set(H(token))).body.data as MigrationDto
   const items = [...dto.groups.extra, ...dto.groups.conflict]
-  const decisions = dto.undecided.map((d) => {
+  const decisions = [...dto.groups.extra, ...dto.groups.conflict].map((i) => i.id).map((d) => {
     const item = items.find((i) => i.id === d)!
     const safe = item.choices.filter((c) => !item.ai_choices.includes(c) && !c.startsWith("move_to:"))
-    return { id: d, choice: choose?.(d, item.choices, item.ai_choices) ?? safe.find((c) => c === "delete" || c === "drop_from_print") ?? safe[0] }
+    return { id: d, choice: choose?.(d, item.choices, item.ai_choices) ?? safe.find((c) => c === "drop_from_print") ?? safe[0] }
   })
   if (decisions.length) expect((await request(app).patch(url(projectId, id, "/decisions")).set(H(token)).send({ decisions })).status).toBe(200)
   return (await request(app).get(url(projectId, id)).set(H(token))).body.data as MigrationDto
@@ -198,12 +197,14 @@ describe("phục hồi kẹt (R2, R3)", () => {
     const lead = await seedFixture("minimal", { balance: 1000 })
     const projectId = await baselinedProject(lead, await makeSrsDocx({ extraBody: LEGACY }))
     const templateId = await publishTemplate(lead.token, lead.orgId, await makeSrsDocx({ extraBody: EXTRA }))
-    const ready = await startReady(lead.token, projectId, { template_id: templateId, version: 1 })
+    // FLF-466: không còn "Xoá" nên không có lô op tự nhiên từ nhóm Thừa nên đặt tay một op vào kế hoạch
+    const ready = await startReady(lead.token, projectId, { template_id: templateId, version: 1 }, undefined)
     await expect(applyMigration(ctxOf(lead, projectId), ready.id, { afterStep: crash("file"), recoverOnError: false })).rejects.toThrow()
     spineRepository.clearReadCache()
     const head = (await spineRepository.get(projectId))!
     await applyTransaction(projectId, { base_version: head.spine_version, ops: [{ op: "set", path: "project.vision", value: "Sửa chen giữa" }], by: "CR-920", reason: "CR-920", step_id: null })
     spineRepository.clearReadCache()
+    await TemplateMigration.updateOne({ _id: ready.id }, { $set: { "spine_plan.ops": [{ op: "set", path: "project.name", value: "Từ kế hoạch cũ", reason: "kế hoạch" }] } })
     const doc = (await TemplateMigration.findById(ready.id))!
     expect(doc.spine_plan?.ops?.length).toBeGreaterThan(0)
     await expect(writeSpine(doc, lead.userId)).rejects.toMatchObject({ code: spineRepository.SPINE_VERSION_CONFLICT })
@@ -217,6 +218,7 @@ describe("phục hồi kẹt (R2, R3)", () => {
 describe("hoàn tác: revertable, waiver, reverting (R4)", () => {
   it("revertable + lý do; cờ tính lại không chặn, waiver của BA chặn; có lần đổi mẫu mở ⇒ 409; reverting bị phục hồi chạy tiếp", async () => {
     const { seeded, projectId } = await importedProject()
+    await saveTemplateProposal(seeded.token, projectId)
     const before = (await Project.findById(projectId).lean())!.template_ref!
     const templateId = await publishTemplate(seeded.token, seeded.orgId, await makeSrsDocx({ extraBody: EXTRA }))
     const id = await migrate(seeded.token, projectId, templateId)
@@ -310,6 +312,7 @@ describe("ngôn ngữ của version cũ (R6)", () => {
 describe("đổi ngược: liên kết gãy (R7)", () => {
   it("broken_links báo trước ở GET; áp dụng 409 LINKS_BROKEN liệt kê; chọn Giữ hết ⇒ hết báo + áp dụng được", async () => {
     const { seeded, projectId } = await importedProject()
+    await saveTemplateProposal(seeded.token, projectId)
     const before = (await Project.findById(projectId).lean())!.template_ref!
     const templateId = await publishTemplate(seeded.token, seeded.orgId, await makeSrsDocx({ extraBody: EXTRA }))
     const forward = await migrate(seeded.token, projectId, templateId)
@@ -391,6 +394,9 @@ describe("dự án chuyển từ FPT (R9)", () => {
   it("mẫu khác ngôn ngữ ⇒ chỉ đổi ngôn ngữ tài liệu: không dịch Spine, không credit, không đặt nền nguyên văn", async () => {
     const { seeded, projectId } = await importedProject()
     await Project.updateOne({ _id: projectId }, { $set: { converted_from: "fpt" } })
+    // Dự án tạo bằng chat rồi chuyển sang import (FLF-318) không có file nền: hồ sơ chỉ là khung tối thiểu, không `source_file_ref`.
+    // Dự án có file đã tải lên rồi ký baseline (chế độ 3/4) cũng mang `converted_from = fpt` nhưng BỊ KHOÁ ngôn ngữ (BF §1, dòng 52).
+    await TemplateProfile.updateOne({ projectId }, { $unset: { source_file_ref: "", flow2_entry_at: "" } })
     const visionBefore = (await spineRepository.get(projectId))!.project.vision
     const templateId = await publishTemplate(seeded.token, seeded.orgId, await makeSrsDocx({ extraBody: VI_BODY }))
     const startBalance = await balanceOf(seeded.orgId)
@@ -466,9 +472,12 @@ describe("AI cho lựa chọn của BA (R11)", () => {
     const started = await request(app).post(url(projectId)).set(H(lead.token)).send({ template_id: templateId, version: 1 })
     const id = started.body.data.id as string
     await request(app).post(url(projectId, id, "/confirm-mapping")).set(H(lead.token))
-    const dto = await decide(lead.token, projectId, id, choose)
+    // Mọi mục có cấu trúc của mẫu đều nhận được (cần AI); BA chọn chuyển vào mục Giả định
+    const prepared = (await request(app).get(url(projectId, id)).set(H(lead.token))).body.data as MigrationDto
+    const assumptions = prepared.groups.missing.find((m) => /Assumptions/.test(m.heading_text))!.new_key
+    const dto = await decide(lead.token, projectId, id, (_id, choices, aiChoices) => aiChoices.find((c) => c === `move_to:${assumptions}`) ?? choose(_id, choices, aiChoices))
     const legacy = dto.groups.extra.find((e) => /Legacy/.test(e.heading_text))!
-    expect(legacy.ai_choices.length, JSON.stringify(legacy)).toBeGreaterThan(0)
+    expect(legacy.ai_choices, JSON.stringify(legacy)).toContain(`move_to:${assumptions}`)
     expect(dto.decisions.find((d) => d.id === legacy.id)!.choice).toMatch(/^move_to:/)
     expect(dto.credit_estimate.structural_moves.count).toBe(1)
     const ready = await request(app).post(url(projectId, id, "/ready")).set(H(lead.token))
@@ -675,5 +684,70 @@ describe("review cuối (R14–R19)", () => {
     await applyTransaction(projectId, { base_version: head.spine_version, ops: [{ op: "add", path: "nfrs[]", value: { category: "other", kind: "descriptive", statement: "Data is encrypted at rest.", priority: "must" } }], by: "CR-941", reason: "CR-941", step_id: null })
     spineRepository.clearReadCache()
     expect(await filled()).toContain("fixed:4.2.4")
+  })
+})
+
+describe("chọn sẵn phương án miễn phí (Xem lại thay đổi)", () => {
+  it("mapping_review → ready không chạm dòng nào; sửa cặp giữ quyết định; áp dụng không tốn credit", async () => {
+    const lead = await seedFixture("minimal", { balance: 1000 })
+    const projectId = await baselinedProject(lead, await makeSrsDocx({ extraBody: LEGACY }))
+    const templateId = await publishTemplate(lead.token, lead.orgId, await makeSrsDocx({ extraBody: EXTRA }))
+    const started = await request(app).post(url(projectId)).set(H(lead.token)).send({ template_id: templateId, version: 1 })
+    expect(started.status, JSON.stringify(started.body.error)).toBe(201)
+    const dto = started.body.data as MigrationDto
+    const id = dto.id
+    expect(dto.state).toBe("mapping_review")
+    const legacy = dto.groups.extra.find((e) => /Legacy/.test(e.heading_text))!
+    // Mục có dữ liệu mà không mục nào của mẫu hợp nghĩa ⇒ giữ thành mục riêng (BA xác nhận), không bao giờ Không in ra độ tin cao
+    expect(legacy).toMatchObject({ suggested: "keep_custom", confidence: "guess", suggested_reason: "kept_for_data" })
+    expect(dto.undecided).toEqual([legacy.id])
+    // Dàn tiêu đề: mục giữ lại hiện đúng chỗ, mục cần viết vàng
+    expect(dto.outline.find((o) => /Legacy/.test(o.heading_text))).toMatchObject({ status: "kept" })
+    expect(dto.outline.find((o) => /Operating Environment/.test(o.heading_text))).toMatchObject({ status: "needs_content" })
+
+    // Quyết định ở bước rà ghép, rồi sửa một cặp không liên quan ⇒ quyết định còn
+    expect((await request(app).patch(url(projectId, id, "/decisions")).set(H(lead.token)).send({ decisions: [{ id: legacy.id, choice: "keep_custom" }] })).status).toBe(200)
+    const matched = dto.groups.matched.find((m) => m.old_key === "fixed:2.1")!
+    const repaired = await request(app).patch(url(projectId, id, "/pairs")).set(H(lead.token)).send({ pairs: [{ old_key: matched.old_key, new_key: matched.new_key }] })
+    expect(repaired.status, JSON.stringify(repaired.body.error)).toBe(200)
+    expect((repaired.body.data as MigrationDto).decisions).toEqual([{ id: legacy.id, choice: "keep_custom" }])
+
+    const startBalance = await balanceOf(lead.orgId)
+    const ready = await request(app).post(url(projectId, id, "/ready")).set(H(lead.token))
+    expect(ready.status, JSON.stringify(ready.body.error)).toBe(200)
+    const readyDto = ready.body.data as MigrationDto
+    expect(readyDto.credit_estimate.total).toBe(0)
+    // Lựa chọn chọn sẵn của mục BA không chạm được ghi thành quyết định; quyết định của BA giữ nguyên
+    const items = [...readyDto.groups.extra, ...readyDto.groups.conflict]
+    expect(readyDto.decisions.map((d) => d.id).sort()).toEqual(items.map((i) => i.id).sort())
+    expect(readyDto.decisions.find((d) => d.id === legacy.id)?.choice).toBe("keep_custom")
+    expect(readyDto.decisions.every((d) => d.choice !== "ai_resolve")).toBe(true)
+
+    const applied = await request(app).post(url(projectId, id, "/apply")).set(H(lead.token))
+    expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
+    expect(await balanceOf(lead.orgId)).toBe(startBalance)
+  })
+
+  it("dòng đoán chặn ready tới khi xác nhận (gửi đúng suggested)", async () => {
+    const lead = await seedFixture("minimal", { balance: 1000 })
+    const projectId = await baselinedProject(lead, await makeSrsDocx({ extraBody: LEGACY }))
+    const templateId = await publishTemplate(lead.token, lead.orgId, await makeSrsDocx({ extraBody: EXTRA }))
+    const started = await request(app).post(url(projectId)).set(H(lead.token)).send({ template_id: templateId, version: 1 })
+    const dto = started.body.data as MigrationDto
+    // Biến mục thừa thành dòng đoán ngay trên bản ghi (fixture tự sinh không có cặp tên gần giống cùng nhóm cha)
+    const stored = (await TemplateMigration.findById(dto.id))!
+    const target = dto.groups.missing.find((m) => m.needs_content)!
+    stored.groups = { ...stored.groups, extra: stored.groups.extra.map((e) => (/Legacy/.test(e.heading_text) ? { ...e, suggested: `move_to:${target.new_key}`, suggested_reason: "close_name" as const, confidence: "guess" as const } : e)) }
+    stored.markModified("groups")
+    await stored.save()
+    const legacyId = dto.groups.extra.find((e) => /Legacy/.test(e.heading_text))!.id
+    const blocked = await request(app).post(url(projectId, dto.id, "/ready")).set(H(lead.token))
+    expect(blocked.status).toBe(409)
+    expect(blocked.body.error.code).toBe("TEMPLATE_MIGRATION_UNDECIDED")
+    expect(blocked.body.meta.undecided).toEqual([legacyId])
+    const confirmed = await request(app).patch(url(projectId, dto.id, "/decisions")).set(H(lead.token)).send({ decisions: [{ id: legacyId, choice: `move_to:${target.new_key}` }] })
+    expect(confirmed.status, JSON.stringify(confirmed.body.error)).toBe(200)
+    expect((confirmed.body.data as MigrationDto).undecided).toEqual([])
+    expect((await request(app).post(url(projectId, dto.id, "/ready")).set(H(lead.token))).status).toBe(200)
   })
 })

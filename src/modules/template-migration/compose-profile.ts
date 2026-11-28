@@ -17,6 +17,10 @@ export interface ComposedProfile {
   layout: LayoutEntry[]
   template_context: TemplateContextEntry[]
   missing_sections: string[]
+  /** Mục cũ BA chọn "Không in ra": bản in coi như đã có chỗ, không gộp ngầm vào mục khác (mục tiêu không in vào Phạm vi). */
+  print_suppressed: string[]
+  /** Lát phần tử của heading lặp lại một mục (chia theo phần tử). */
+  section_slices: { custom_id: string; section_id: string; items: string[] }[]
   warnings: string[]
 }
 
@@ -27,6 +31,9 @@ export interface ComposeInput {
   needsContent: ReadonlySet<string>
   /** Cột đã biết ánh xạ field (mẫu đích + profile cũ): tiêu đề đã gập ⇒ `field_path`. Mẫu đích đứng trước thắng. */
   knownColumns: readonly { header: string; field_path: string | null }[]
+  /** `section_id` của mục cũ chọn "Không in ra". */
+  printSuppressed?: readonly string[]
+  slices?: readonly { custom_id: string; section_id: string; items: string[] }[]
 }
 
 const GUIDANCE_BRACKETS = (text: string): string => (/^[[{(]/.test(text.trim()) ? text : `[${text}]`)
@@ -94,5 +101,5 @@ export const composeProfile = async (input: ComposeInput): Promise<ComposedProfi
   }
   const template_context = buildTemplateContext(layout.filter((l) => missingSet.has(l.section_id)), context)
 
-  return { heading_map, table_map, layout, template_context, missing_sections, warnings }
+  return { heading_map, table_map, layout, template_context, missing_sections, print_suppressed: [...new Set(input.printSuppressed ?? [])], section_slices: [...(input.slices ?? [])], warnings }
 }

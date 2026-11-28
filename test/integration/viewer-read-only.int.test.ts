@@ -81,7 +81,7 @@ describe("Viewer vẫn đọc được", () => {
   })
 
   it("không đọc được dữ liệu làm việc (Spine, cờ, change, nguồn, chat, step) - UC-47", async () => {
-    for (const suffix of ["/spine", "/flags", "/changes", "/sources", "/documents", "/chats", "/steps", "/change-requests"]) {
+    for (const suffix of ["/spine", "/flags", "/changes", "/sources", "/documents", "/chats", "/steps", "/change-requests", "/pending-queue", "/documents/650000000000000000000001/text", "/documents/650000000000000000000001/download"]) {
       const path = "/api/v1/projects/" + seeded.projectId + suffix
       const res = await request(app).get(path).set(bearer(viewer))
       expect(res.status, path).toBe(403)
@@ -94,12 +94,12 @@ describe("Viewer vẫn đọc được", () => {
     expect(res.status).toBe(403)
   })
 
-  it("ghép tài liệu (chỉ dựng bản đọc) không bị chốt chặn", async () => {
+  it("không ghép được tài liệu (FLF-466: Viewer chỉ thấy bản ổn định, không dựng bản nháp)", async () => {
     const res = await request(app)
       .post("/api/v1/projects/" + seeded.projectId + "/assemble")
       .set(bearer(viewer))
       .send({ base_version: seeded.spineVersion })
-    expect(res.body.error?.code).not.toBe("ORG_ROLE_FORBIDDEN")
-    expect(res.status).not.toBe(403)
+    expect(res.status).toBe(403)
+    expect(res.body.error?.code).toBe("ORG_ROLE_FORBIDDEN")
   })
 })

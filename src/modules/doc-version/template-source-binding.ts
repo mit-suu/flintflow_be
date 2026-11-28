@@ -13,14 +13,17 @@ import { stripTemplateTextNow } from "../render/strip-template-text.js"
 import { currentFidelityAnchor, type FidelityAnchor } from "../render/source-fidelity.js"
 import type { ProjectLanguages } from "../translation/translation.service.js"
 
-/** Tăng khi cách dựng bản in version đổi (bỏ cache cũ): v3 = mốc nguyên vẹn + ngôn ngữ nhãn lấy từ binding của version. */
-export const FIXED_TEMPLATE_RENDERER_REVISION = "fixed-template-v3"
+/**
+ * Tăng khi cách dựng bản in version đổi (bỏ cache cũ): v3 = mốc nguyên vẹn + ngôn ngữ nhãn lấy từ binding của version; v4 = đoạn
+ * nguyên văn (`section_segments`) đi qua binding + bảng NFR có cột ID / mức ưu tiên theo ngôn ngữ (bug #1 FLF-447).
+ */
+export const FIXED_TEMPLATE_RENDERER_REVISION = "fixed-template-v4"
 
 /** Immutable source and mapping captured together when a version is written. */
 export type TemplateSourceBinding = Pick<ITemplateProfile,
   "heading_map" | "table_map" | "layout" | "template_family" | "language" |
   "legacy_record_of_changes" | "non_screen_table" | "function_originals" | "section_slices"
-> & {
+> & Partial<Pick<ITemplateProfile, "section_segments" | "print_suppressed">> & {
   source_file_ref: string
   source_sha256: string
   /**
@@ -42,7 +45,7 @@ export const templateLayoutUnavailable = () => new ApiError(409,
 
 /** Ngôn ngữ nhãn của dự án chuyển từ mode 2 — chốt vào binding để đổi ngôn ngữ tài liệu về sau không đổi bản in version cũ. */
 const captureLanguages = async (projectId: string): Promise<ProjectLanguages | null> => {
-  const project = await Project.findById(projectId, { mode: 1, converted_from: 1, documentLanguage: 1 }).lean()
+  const project = await Project.findById(projectId, { mode: 1, converted_from: 1, documentLanguage: 1, source_language: 1 }).lean()
   if (project?.converted_from !== "fpt") return null
   const { projectLanguages } = await import("../translation/translation.service.js")
   return projectLanguages(projectId, project)
@@ -75,7 +78,10 @@ const captureBinding = async (projectId: string): Promise<TemplateSourceBinding 
     heading_map: profile.heading_map, table_map: profile.table_map, layout: profile.layout,
     template_family: profile.template_family, language: profile.language,
     legacy_record_of_changes: profile.legacy_record_of_changes ?? [], non_screen_table: profile.non_screen_table ?? [],
-    function_originals: profile.function_originals ?? [], section_slices: profile.section_slices ?? []
+    function_originals: profile.function_originals ?? [], section_slices: profile.section_slices ?? [],
+    // Bug #1: đoạn nguyên văn (FLF-366) chốt cùng version — thiếu thì bản in version dựng lại cả mục từ Spine (mất cột "Mã"…)
+    section_segments: profile.section_segments ?? [],
+    print_suppressed: profile.print_suppressed ?? []
   })) as TemplateSourceBinding
 }
 
@@ -83,6 +89,9 @@ export const templateLayoutFromBinding = (binding: TemplateSourceBinding): Templ
   fixedTemplate: true, layout: binding.layout, language: binding.language,
   legacyRecord: binding.legacy_record_of_changes, nonScreenTable: binding.non_screen_table,
   functionOriginals: binding.function_originals, sectionSlices: binding.section_slices,
+  // Bug #1: như `loadTemplateLayout` (giao diện web) — binding cũ không có ⇒ in như trước
+  ...(binding.section_segments?.length ? { sectionSegments: binding.section_segments } : {}),
+  ...(binding.print_suppressed?.length ? { printSuppressed: binding.print_suppressed } : {}),
   // FLF-420: version ghi trên khung mẫu ⇒ mã use case do FlintFlow cấp, in liên tục (chốt theo snapshot của version)
   ...(binding.strip_template_text ? { relabelUseCases: true } : {})
 })

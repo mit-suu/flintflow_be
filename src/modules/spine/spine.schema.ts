@@ -20,6 +20,7 @@ const id = z.string().min(1)
 const isoDateTime = z.iso.datetime({ offset: true })
 const nonNegativeInt = z.number().int().min(0)
 const priority = z.enum(["must", "should", "could", "wont"])
+const sourceRef = z.string().nullable().optional()
 
 // ─── project / progress / steps ──────────────────────────────────
 
@@ -60,7 +61,18 @@ export const progressSchema = z.strictObject({
   current_step: z.string().nullable(),
   screen_cursor: z.string().nullable(),
   screen_queue: z.array(id),
-  elicit_turns_this_phase: nonNegativeInt
+  elicit_turns_this_phase: nonNegativeInt,
+  credit_ack_required: z
+    .strictObject({
+      scope: z.enum(["after_brief", "screens_locked", "screens_added", "reference_documents"]),
+      credits: z.number().min(0),
+      created_at: z.string(),
+      screens: z.array(id).optional(),
+      documents: nonNegativeInt.optional()
+    })
+    .nullable()
+    .optional(),
+  credit_acked_screens: z.array(id).optional()
 })
 
 export const stepStateSchema = z.strictObject({
@@ -88,7 +100,9 @@ export const actorSchema = z.strictObject({
   flows_in: z.array(z.string()).optional(),
   flows_out: z.array(z.string()).optional(),
   /** Actor cha (generalization); vắng/null ⇒ actor không chuyên biệt hoá actor nào. */
-  parent_id: id.nullable().optional()
+  parent_id: id.nullable().optional(),
+  /** FLF-493: nền tảng actor người dùng (`web` / `mobile`); vắng ⇒ chưa biết. */
+  platforms: z.array(z.enum(["web", "mobile"])).optional()
 })
 
 export const roleSchema = z.strictObject({
@@ -254,7 +268,9 @@ export const functionSchema = z.strictObject({
   // FLF-418: message giữa actor / màn / control / entity (sơ đồ tuần tự mức thành phần). Chỉ có khi dự án chọn mức component
   component_interactions: z.array(componentInteractionSchema).optional(),
   /** FLF-365: bản phát hành của yêu cầu (phân bổ yêu cầu, "1.0"; "deferred" = hoãn). Thiếu = chưa phân bổ. */
-  release: z.string().nullable().optional()
+  release: z.string().nullable().optional(),
+  /** Nguồn của yêu cầu do AI soạn (tài liệu, đoạn hoặc người yêu cầu). Thiếu = chưa ghi nguồn; Spine cũ không có. */
+  source_ref: sourceRef
 })
 
 export const nfrSchema = z.strictObject({
@@ -266,14 +282,16 @@ export const nfrSchema = z.strictObject({
   threshold: z.string().optional(),
   priority: priority.nullable(),
   /** FLF-365: như `functionSchema.release`. */
-  release: z.string().nullable().optional()
+  release: z.string().nullable().optional(),
+  source_ref: sourceRef
 })
 
 export const businessRuleSchema = z.strictObject({
   id,
   tier: z.enum(["high", "detail"]),
   statement: z.string(),
-  source_validation_ids: z.array(id)
+  source_validation_ids: z.array(id),
+  source_ref: sourceRef
 })
 
 export const commonRequirementSchema = z.strictObject({
@@ -301,7 +319,12 @@ export const otherRequirementSchema = z.strictObject({
   kind: z.enum(["risk", "assumption", "open_question", "technical_risk"]),
   statement: z.string(),
   /** Câu bằng ngôn ngữ user (FLF-237) — panel Hồ sơ dự án hiện câu này; dữ liệu cũ không có ⇒ FE rơi về `statement`. */
-  statement_vi: z.string().min(1).nullish()
+  statement_vi: z.string().min(1).nullish(),
+  /**
+   * FLF-449 (việc 16): câu trong Brief / tài liệu làm nảy ra mục này, chép nguyên văn (chỗ thiếu của Brief bắt buộc có,
+   * server bỏ mục có câu trích không tìm thấy). Không in vào SRS. Dữ liệu cũ và mục do bước khác ghi không có.
+   */
+  source_quote: z.string().min(1).nullish()
 })
 
 export const glossaryTermSchema = z.strictObject({
@@ -442,6 +465,8 @@ export const flagSchema = z.strictObject({
   rule_id: z.string().min(1),
   section_id: z.string().min(1),
   target_id: id.nullable().optional(),
+  // FLF-449: tên lens của cờ AI `ai_review`; thiếu với mọi cờ khác
+  lens: z.string().min(1).nullable().optional(),
   message: z.string(),
   remediation_step: z.string().min(1),
   opened_at_version: z.number().int().min(1),

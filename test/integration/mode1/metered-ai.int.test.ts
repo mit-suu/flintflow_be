@@ -48,7 +48,7 @@ describe("withMeteredAi - usage theo từng loại gọi (luồng thật)", () =
     const rows = await Usage.find({ projectId }).lean()
     const steps = new Set(rows.map((r) => r.step_id))
     expect([...steps].filter((s) => s.startsWith("I-4:")).length).toBeGreaterThan(0)
-    for (const s of [...steps].filter((x) => x.startsWith("I-4:"))) expect(s).toMatch(/^I-4:(fixed|function):/)
+    for (const s of [...steps].filter((x) => x.startsWith("I-4:"))) expect(s).toMatch(/^I-4:(fixed|function|content):/)
     for (const s of ["I-1.11:1", "I-1.11:cross", "C-2:CR-001", "C-4:CR-001", "C-5:CR-001"]) expect(steps.has(s), s).toBe(true)
     expect(rows.every((r) => r.state === "deducted")).toBe(true)
     expect(rows.find((r) => r.step_id === "C-2:CR-001")).toMatchObject({ call_kind: ActionType.CR_CLARIFY, attempt: 1 })

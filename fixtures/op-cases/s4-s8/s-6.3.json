@@ -13,7 +13,8 @@
         "kind": "quantitative",
         "metric": "Monthly uptime",
         "threshold": ">= 99.5 %",
-        "priority": null
+        "priority": null,
+        "source_ref": "Client brief"
       },
       "reason": "S-6 reliability"
     },
@@ -27,7 +28,8 @@
         "kind": "quantitative",
         "metric": "Recovery time (RTO)",
         "threshold": "<= 4 h",
-        "priority": null
+        "priority": null,
+        "source_ref": "Client brief"
       },
       "reason": "S-6 reliability"
     },
@@ -41,7 +43,8 @@
         "kind": "quantitative",
         "metric": "Data loss window (RPO)",
         "threshold": "<= 15 min",
-        "priority": null
+        "priority": null,
+        "source_ref": "Client brief"
       },
       "reason": "S-6 reliability"
     }

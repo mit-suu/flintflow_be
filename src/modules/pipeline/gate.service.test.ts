@@ -100,10 +100,12 @@ import { spineSchema } from "../spine/spine.schema.js"
 import type { Spine as SpineT } from "../spine/spine.types.js"
 import * as repo from "../spine/spine.repository.js"
 import { applyTransaction } from "../spine/op-engine.js"
+import type { Op, UserOp } from "../spine/op.types.js"
 import { orderedSteps } from "./step-registry.js"
 import type { StepRunnerDeps } from "./step-runner.service.js"
-import type { AiActionInput, AiActionResult } from "../../shared/ai/ai-action.types.js"
+import { AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
+import { wasAcceptedBefore } from "./step-runner.service.js"
 import { gate, gateAssumptionIdsOf, phaseGateAssumptions, GateLimitError, REGENERATE_LIMIT, CALL_LIMIT } from "./gate.service.js"
 import { acquireRun, finishRun, resetMemoryRuns } from "./run-state.service.js"
 import { resumeProject } from "./resume.service.js"
@@ -346,6 +348,114 @@ describe("gate.service: regenerate - trần 3/step", () => {
   })
 })
 
+describe("gate.service: FLF-470 - regenerate chia lô cho step cố định chia lô (S-7.1/S-7.3)", () => {
+  /** N function, mỗi function có nguồn cho cả S-7.1 (`validations[kind=business]`) và S-7.3 (`abnormal[]`). */
+  const manyFunctions = (n: number): SpineT["functions"] =>
+    Array.from({ length: n }, (_, i) => {
+      const id = `FN${String(i + 1).padStart(3, "0")}`
+      return {
+        id,
+        screen_id: null,
+        feature_id: "F1",
+        order: i,
+        name: `Function ${i + 1}`,
+        trigger: "x",
+        description: "x",
+        normal: ["ok"],
+        abnormal: ["bad"],
+        validations: [{ id: `${id}-V1`, kind: "business" as const, statement: "policy" }],
+        business_rule_ids: [],
+        priority: null
+      }
+    })
+
+  const stepsBeforePhaseOf = (stepId: string) => {
+    const all = orderedSteps({ screens: [], functions: [] })
+    const idx = all.findIndex((s) => s.id === stepId)
+    return all.slice(0, idx).map((s) => ({ id: s.id, status: "accepted" as const, first_seq: 1, last_seq: 1, accepted_at: "2026-01-01T00:00:00.000Z" }))
+  }
+
+  const seedManyFunctions = (stepId: string, n: number) => {
+    const spine = structuredClone(MINIMAL)
+    spine.actors = [{ id: "A00", name: "Base actor", kind: "human", description: "sẵn có" }]
+    spine.functions = manyFunctions(n)
+    spine.progress.current_phase = stepId.split(".")[0]
+    spine.progress.current_step = stepId
+    spine.steps = stepsBeforePhaseOf(stepId)
+    db.spines[0] = { _id: crypto.randomUUID() /* seed mới mỗi lần, như Mongo */, projectId: PROJECT, ...spine }
+  }
+
+  /** Function ids chiếu vào projection của lượt này — như `batchFunctionIds` ở T18 e2e. */
+  const batchFunctionIds = (input: AiActionInput): string[] => {
+    const projection = (input.promptVariables?.projection ?? {}) as Record<string, unknown>
+    const key = Object.keys(projection).find((k) => k.startsWith("functions"))
+    const list = key === undefined ? [] : projection[key]
+    return Array.isArray(list) ? list.map((el) => (el as { id: string }).id) : []
+  }
+
+  /** Op hợp lệ cho đúng `writes` của step (S-7.1 ghi `business_rules[]`, S-7.3 ghi `messages[]`) — op ngoài
+   * phạm vi này bị op-validator từ chối (`path_not_writable`) và khiến `draftOps` thử lại cùng lô. */
+  const validAddOp = (stepId: "S-7.1" | "S-7.3"): UserOp =>
+    stepId === "S-7.1"
+      ? { op: "add", path: "business_rules[]", value: { id: "BR90", tier: "detail", statement: "Policy from regenerate.", source_validation_ids: ["FN001-V1"] } }
+      : { op: "add", path: "messages[]", value: { id: "M90", code: "GEN-001", text: "Something went wrong.", function_ids: ["FN001"] } }
+
+  it.each(["S-7.1", "S-7.3"] as const)("%s: 25 function (> cỡ lô 10) ⇒ regenerate gọi executor nhiều lô, phủ đủ function, không cắt token", async (stepId) => {
+    seedManyFunctions(stepId, 25)
+    const version = await seedInProgressWithContent(stepId, "A90")
+
+    const calls: string[][] = []
+    const draftExecutor: StepRunnerDeps["draftExecutor"] = async (actionType, input) => {
+      calls.push(batchFunctionIds(input))
+      return draftReply(calls.length === 1 ? [validAddOp(stepId)] : [])
+    }
+
+    const result = await gate(PROJECT, stepId, USER, { action: "regenerate", base_version: version }, { draftExecutor })
+
+    expect(result.step.status).toBe("in_progress")
+    expect(calls.length, `${stepId} phải chia nhiều lô với 25 function`).toBeGreaterThanOrEqual(3)
+    expect(calls.every((batch) => batch.length > 0 && batch.length <= 10)).toBe(true)
+    expect(calls.flat().sort()).toEqual(manyFunctions(25).map((f) => f.id).sort())
+    const union = new Set(calls.flat())
+    expect(union.size, "các lô không chồng nhau").toBe(calls.flat().length)
+  })
+
+  it.each(["S-7.1", "S-7.3"] as const)("%s: revision vẫn giữ MỘT lượt (không chia lô) dù 25 function", async (stepId) => {
+    seedManyFunctions(stepId, 25)
+    const version = await seedInProgressWithContent(stepId, "A90")
+
+    const calls: string[][] = []
+    const draftExecutor: StepRunnerDeps["draftExecutor"] = async (actionType, input) => {
+      calls.push(batchFunctionIds(input))
+      return draftReply([])
+    }
+
+    await gate(PROJECT, stepId, USER, { action: "revision", note: "sửa gọn lại một chỗ", base_version: version }, { draftExecutor })
+
+    expect(calls.length, `${stepId} revision chỉ một lượt, không chia lô`).toBe(1)
+    // Lượt duy nhất thấy NGUYÊN projection (không lọc theo lô) — không truyền `function_ids` lọc dần.
+    expect(calls[0].length).toBe(25)
+  })
+
+  it.each(["S-7.1", "S-7.3"] as const)(
+    "%s: hồi quy cắt token — executor giả ném RESPONSE_TRUNCATED khi lô > 10 function; 30 function vẫn qua vì chia lô giữ ≤ 10",
+    async (stepId) => {
+      seedManyFunctions(stepId, 30)
+      const version = await seedInProgressWithContent(stepId, "A90")
+
+      const draftExecutor: StepRunnerDeps["draftExecutor"] = async (_actionType, input) => {
+        const batch = batchFunctionIds(input)
+        // Trước FLF-470/FLF-433: một lượt ôm nguyên 30 function ⇒ cắt ở max_tokens (log thật FLF-441 #9).
+        if (batch.length > 10) throw new AiActionError(422, "Anthropic response was truncated (max_tokens=20480)", "RESPONSE_TRUNCATED")
+        return draftReply([])
+      }
+
+      const result = await gate(PROJECT, stepId, USER, { action: "regenerate", base_version: version }, { draftExecutor })
+      expect(result.step.status).toBe("in_progress")
+    }
+  )
+})
+
 describe("gate.service: B7 reopen - revision/regenerate trên step đã accepted (F6)", () => {
   it("accept rồi revision ⇒ reopen (revision_requested, reset accepted_at) rồi redraft, calls_used vòng MỚI không cộng dồn vòng cũ (F1)", async () => {
     seedSpine()
@@ -469,6 +579,32 @@ describe("gate.service: accept", () => {
     const record = await repo.get(PROJECT)
     const err = await gate(PROJECT, STEP, USER, { action: "accept", base_version: record!.spine_version }).catch((e: unknown) => e)
     expect(err).toMatchObject({ statusCode: 409, code: "STEP_NOT_RUNNABLE" })
+  })
+
+  it("FLF-489: accept lần đầu ⇒ không có rerun; mở lại (revision) rồi accept ⇒ rerun: true", async () => {
+    seedSpine()
+    const version = await seedInProgressWithContent(STEP, "A90")
+    const first = await gate(PROJECT, STEP, USER, { action: "accept", base_version: version })
+    expect(first.rerun).toBeUndefined()
+
+    const revised = await gate(
+      PROJECT,
+      STEP,
+      USER,
+      { action: "revision", note: "cần sửa mô tả actor cho rõ hơn", base_version: first.spine_version },
+      { draftExecutor: async () => draftReply([{ op: "add", path: "actors[]", value: { id: "A95", name: "Rerun", kind: "human", description: "z" } }]) }
+    )
+    expect(revised.rerun).toBeUndefined()
+    const second = await gate(PROJECT, STEP, USER, { action: "accept", base_version: revised.spine_version })
+    expect(second.rerun).toBe(true)
+    expect(second.step.status).toBe("accepted")
+  })
+
+  it("FLF-489: wasAcceptedBefore chỉ tính change status=accepted của đúng bước", () => {
+    const c = (path: string, value: unknown) => ({ path, value })
+    expect(wasAcceptedBefore([c("steps[id=S-7.3].status", "accepted")], "S-7.3")).toBe(true)
+    expect(wasAcceptedBefore([c("steps[id=S-7.4].status", "accepted")], "S-7.3")).toBe(false)
+    expect(wasAcceptedBefore([c("steps[id=S-7.3].status", "in_progress")], "S-7.3")).toBe(false)
   })
 
   it("F19: accept step cuối cùng của phase S-2 ⇒ notify phase_accepted với đúng userId + meta.phase", async () => {
@@ -867,5 +1003,55 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
     const version = seedB03()
     const accepted = await gate(PROJECT, "B-0.3", USER, { action: "accept", base_version: version })
     expect(accepted.message_vi).toBeUndefined()
+  })
+})
+
+describe("gate.service: FLF-482 (C2) - lời sửa ngoài mục của bước", () => {
+  const reply = (data: Record<string, unknown>) => ({ ...draftReply([]), data: { ops: [], ...data } }) as unknown as AiActionResult<OpTransaction>
+
+  it("model báo out_of_scope, không ghi op ⇒ route_to_change mang đúng câu user, lời cổng nói thật", async () => {
+    seedSpine()
+    const version = await seedInProgressWithContent(STEP, "A90")
+    const result = await gate(
+      PROJECT,
+      STEP,
+      USER,
+      { action: "revision", note: "bản 1.0 bỏ hai nhóm quản lý chi nhánh", base_version: version },
+      { draftExecutor: async () => reply({ out_of_scope: "drop two feature groups from release", notes: "Tôi sẽ cập nhật phạm vi 1.0." }) }
+    )
+    expect(result.route_to_change).toEqual({ instruction: "bản 1.0 bỏ hai nhóm quản lý chi nhánh" })
+    expect(result.message_vi).toContain("Sửa tài liệu")
+    expect(result.message_vi).not.toMatch(/sẽ cập nhật/)
+  })
+
+  it("không ghi op, không out_of_scope mà lời hứa 'sẽ cập nhật' ⇒ thay bằng câu trung thực, không route", async () => {
+    seedSpine()
+    const version = await seedInProgressWithContent(STEP, "A90")
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const result = await gate(
+      PROJECT,
+      STEP,
+      USER,
+      { action: "revision", note: "nhận thêm ZaloPay", base_version: version },
+      { draftExecutor: async () => reply({ notes: "Tôi sẽ cập nhật cổng thanh toán ở phần vai trò." }) }
+    )
+    expect(result.route_to_change).toBeUndefined()
+    expect(result.message_vi).toContain("chưa ghi gì")
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("[gate-promise-no-op]"))
+    warn.mockRestore()
+  })
+
+  it("lượt có ghi op và không out_of_scope ⇒ không đổi lời, không route", async () => {
+    seedSpine()
+    const version = await seedInProgressWithContent(STEP, "A90")
+    const result = await gate(
+      PROJECT,
+      STEP,
+      USER,
+      { action: "revision", note: "thêm actor", base_version: version },
+      { draftExecutor: async () => reply({ ops: [{ op: "add", path: "actors[]", value: { id: "A95", name: "New", kind: "human", description: "q" } }], notes: "Tôi đã thêm vai mới." }) }
+    )
+    expect(result.route_to_change).toBeUndefined()
+    expect(result.message_vi).toBe("Tôi đã thêm vai mới.")
   })
 })

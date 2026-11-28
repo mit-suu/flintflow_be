@@ -12,10 +12,13 @@ import { hasBaseline } from "../import/import.state.js"
 import { latestImport, transitionImport } from "../import/import.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { toIso } from "../import/mode1.http.js"
-import { clipMaterialText, formatCrId, formatMaterialId } from "./change-request.constants.js"
+import { crDocumentLanguage } from "./cr-language.js"
+import { clipMaterialText, formatCrId, formatMaterialId, type CrSourceKind } from "./change-request.constants.js"
 import type { ChangeRequestDetail, CreateChangeRequest, PendingSection } from "./change-request.dto.js"
-import { ChangeRequest, CrCounter, type CrSeed, type IChangeRequest } from "./change-request.model.js"
-import { CR_STATUS_LABELS, assertTransition, isTerminal, type CrStatus } from "./change-request.state.js"
+import { ChangeRequest, CrCounter, type CrClarification, type CrSeed, type IChangeRequest } from "./change-request.model.js"
+import { DocVersion } from "../doc-version/doc-version.model.js"
+import { CR_OPEN_STATUSES, CR_STATUSES, MAX_CLARIFY_ROUNDS, CR_STATUS_LABELS, assertTransition, isTerminal, type CrStatus } from "./change-request.state.js"
+import { seedFromFlags } from "./flag-seed.js"
 import { ChangeGroup } from "./change-group.model.js"
 import { ChangeLocation, type LocationProposal } from "./change-location.model.js"
 import { regroup } from "./group.service.js"
@@ -26,9 +29,12 @@ import { notify } from "../notification/notification.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { unlockPaths } from "./lock.service.js"
 import { checkBeforeWrite, othersPending, pendingSections, userName } from "./concurrent-edit.js"
-import { elementText, locationDisplay } from "./location-display.js"
-import { previewAfter } from "./propose.service.js"
-import { addedElements, currentText, isArrayPath, opElement, valueText } from "./spine-location.js"
+import { changedProjectFields, elementText, locationDisplay } from "./location-display.js"
+import { LARGE_CR_LOCATIONS, previewAfter, proposeEstimate, type ProposeEstimate } from "./propose.service.js"
+import { hasPendingWarning, recheckBeforeWrite } from "./verify.service.js"
+import { getActionCost } from "../../shared/ai/credit-reservation.service.js"
+import { ActionType } from "../../shared/ai/ai-action.types.js"
+import { PROJECT_PATH, addedElements, currentText, isArrayPath, opElement, projectSectionOf, valueText } from "./spine-location.js"
 import { peekPreview } from "../spine/change.service.js"
 import { markPreviewAsCr } from "../spine/change-transcript.js"
 
@@ -51,6 +57,19 @@ export const transitionCr = async (cr: IChangeRequest, to: CrStatus): Promise<vo
   assertTransition(cr.status, to)
   cr.status = to
   await cr.save()
+  // FLF-466: bản phát hành đã liệt kê CR này trước khi nó kịp sang `written` (đua với release) ⇒ đi thẳng `released`
+  if (to === "written" && (await DocVersion.exists({ projectId: cr.projectId, kind: "release", cr_ids: cr.cr_id }))) {
+    cr.status = "released"
+    await cr.save()
+  }
+}
+
+/** FLF-474: vòng làm rõ đang chờ trả lời, đếm từ lần gộp lệnh gần nhất như `runClarify` (`asked`). */
+export const clarifyRoundOf = (cr: IChangeRequest): { n: number; max: number; extra: boolean } | null => {
+  if (cr.status !== "awaiting_answers" || cr.clarifications.length === 0) return null
+  const lastAmendment = cr.amendments?.length ? cr.amendments[cr.amendments.length - 1] : null
+  const n = Math.max(1, cr.clarifications.length - (lastAmendment?.after_round ?? 0))
+  return { n, max: MAX_CLARIFY_ROUNDS, extra: n > MAX_CLARIFY_ROUNDS }
 }
 
 const toCrDto = (cr: IChangeRequest): ChangeRequestDetail["change_request"] => ({
@@ -66,14 +85,17 @@ const toCrDto = (cr: IChangeRequest): ChangeRequestDetail["change_request"] => (
     round: c.round,
     questions: [...c.questions],
     answers: [...c.answers],
-    suggestions: c.questions.map((_, i) => [...(c.suggestions?.[i] ?? [])])
+    suggestions: c.questions.map((_, i) => [...(c.suggestions?.[i] ?? [])]),
+    kinds: c.kinds?.length ? [...c.kinds] : []
   })),
+  clarify_round: clarifyRoundOf(cr),
   base_doc_version: cr.base_doc_version,
   result_doc_version: cr.result_doc_version ?? null,
   created_by: String(cr.created_by),
   submitted_at: toIso(cr.submitted_at),
   decided_by: cr.decided_by ? String(cr.decided_by) : null,
   closed_reason: cr.closed_reason ?? null,
+  flag_ids: [...(cr.flag_ids ?? [])],
   seed: cr.seed ? { instruction: cr.seed.instruction ?? null, ops: [...cr.seed.ops], targets: [...cr.seed.targets] } : null,
   materials: (cr.materials ?? []).map((m) => ({
     material_id: m.material_id,
@@ -85,6 +107,7 @@ const toCrDto = (cr: IChangeRequest): ChangeRequestDetail["change_request"] => (
     added_at: toIso(m.added_at)!
   })),
   missing_info: [...(cr.missing_info ?? [])],
+  withdraw_suggested: cr.withdraw_suggested ?? false,
   amendments: (cr.amendments ?? []).map((a) => ({ text: a.text, at: toIso(a.at)! })),
   created_at: toIso(cr.createdAt)!,
   updated_at: toIso(cr.updatedAt)!
@@ -122,16 +145,20 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
     loadLayout(String(cr.projectId))
   ])
   const spine = record ? stripRecord(record) : null
+  const docLang = spine ? await crDocumentLanguage(String(cr.projectId), spine) : undefined
   const pending = await othersPending(cr.projectId, cr.cr_id, locations.map((l) => l.path))
   const asText = (json: string | null | undefined) => (json ? elementText(parseJson(json)) : "")
   return {
     change_request: { ...toCrDto(cr), created_by_name: (await userName(String(cr.created_by))) ?? null },
     locations: locations.map((l) => {
+      // Lỗi #6: vị trí `project` lưu `fixed:1` từ lúc tìm — có đề xuất thì biết field nào đổi ⇒ đúng mục (vd `slot:goals`)
+      const section_id =
+        l.path === PROJECT_PATH ? (projectSectionOf(changedProjectFields(l.proposal, spine?.project), layout) ?? l.section_id) : l.section_id
       return {
         location_id: l.location_id,
         path: l.path,
-        section_id: l.section_id,
-        section_title: spine && l.section_id !== "misc" ? titleOfSection(spine, l.section_id, layout) : "",
+        section_id,
+        section_title: spine && section_id !== "misc" ? titleOfSection(spine, section_id, layout, docLang) : "",
         current_text: spine ? currentText(spine, l.path) : "",
         found_by: [...l.found_by],
         entity_paths: [...l.entity_paths],
@@ -153,6 +180,9 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
             }
           : null,
         group_id: l.group_id ?? null,
+        warning: l.warning ? { text: l.warning.text, reason: l.warning.reason } : null,
+        kept_intent: l.kept_intent ?? false,
+        kept_violations: [...(l.kept_violations ?? [])],
         // Đề xuất cũ lưu `new_text = null` (chạy khô từng hỏng) ⇒ tính lại chữ "sau" từ op để người dùng thấy sẽ đổi gì
         display: locationDisplay(
           spine,
@@ -185,8 +215,19 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
       decided_by: g.decided_by ? String(g.decided_by) : null,
       decided_at: toIso(g.decided_at)
     })),
-    pending_questions: pendingQuestions(cr)
+    pending_questions: pendingQuestions(cr),
+    propose_estimate: await estimateOf(cr, spine, locations)
   }
+}
+
+/**
+ * C-3 liệt kê đủ vị trí (không cắt trần) ⇒ CR lớn gọi nhiều lô C-4. Trước khi chạy C-4 (CR còn ở "xem phạm vi") mà vượt
+ * `LARGE_CR_LOCATIONS` vị trí thì báo tổng credit ước tính (số lô × giá một lô); còn lại `null`.
+ */
+const estimateOf = async (cr: IChangeRequest, spine: ReturnType<typeof stripRecord> | null, locations: readonly { path: string }[]): Promise<ProposeEstimate | null> => {
+  if (cr.status !== "impact_review" || !spine || locations.length <= LARGE_CR_LOCATIONS) return null
+  const docs = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id })
+  return proposeEstimate(spine, docs, await getActionCost(ActionType.CR_PROPOSE))
 }
 
 export const listCrs = async (projectId: string, status?: CrStatus): Promise<ChangeRequestDetail["change_request"][]> => {
@@ -215,14 +256,58 @@ export const seedFromPreview = (projectId: string, userId: string, previewId: st
   return { instruction: preview.instruction, ops: preview.ops.map((op) => ({ ...op }) as Record<string, unknown>), targets }
 }
 
-export const createCr = async (projectId: string, userId: string, body: CreateChangeRequest): Promise<IChangeRequest> => {
+/** Gợi ý của CR: bản xem trước và / hoặc nhóm cờ (đích gộp, bỏ trùng). Không có cả hai ⇒ `null`. */
+const mergeSeeds = (preview: CrSeed | null, flags: CrSeed | null): CrSeed | null =>
+  preview && flags ? { ...preview, targets: [...new Set([...preview.targets, ...flags.targets])] } : (preview ?? flags)
+
+/** Id cờ đang thuộc CR chưa kết thúc của project — hàng việc chờ quyết bỏ các cờ này (FLF-445). */
+export const flagIdsInOpenCrs = async (projectId: string): Promise<Set<string>> => {
+  const terminal = CR_STATUSES.filter(isTerminal)
+  const ids: string[] = await ChangeRequest.distinct("flag_ids", { projectId, status: { $nin: terminal }, "flag_ids.0": { $exists: true } })
+  return new Set(ids)
+}
+
+/**
+ * BF §3.2 C-1: mỗi người một CR mở một lúc - người tạo đã có CR chưa kết thúc ⇒ 409 `CR_OWN_OPEN` (`meta.cr_id` = CR đó để
+ * FE mở lại). Chỉ áp cho CR do chính người này tạo; CR của người khác không liên quan. `createCr` gọi khi
+ * `enforceOwnOpen` (controller, hoàn tác); lô CR hệ thống tạo thay người dùng (rút yêu cầu từ tài liệu) không bật.
+ */
+export const assertNoOwnOpenCr = async (projectId: string, userId: string): Promise<void> => {
+  const open = await ChangeRequest.findOne({ projectId, created_by: userId, status: { $in: CR_OPEN_STATUSES } }, { cr_id: 1, title: 1 }).sort({ createdAt: 1 }).lean()
+  if (open) {
+    throw new ApiError(409, `Bạn đang có ${open.cr_id} chưa xong - hoàn tất hoặc huỷ ${open.cr_id} trước khi tạo change request mới.`, "CR_OWN_OPEN", { cr_id: open.cr_id, title: open.title })
+  }
+}
+
+/** Đầu vào tạo CR: như `CreateChangeRequest` nhưng nguồn nhận cả loại hệ thống tự đặt (`revert`) mà client không tạo trực tiếp được. */
+export type CreateCrInput = Omit<CreateChangeRequest, "source"> & { source: { kind: CrSourceKind; ref: string | null; note: string | null } }
+
+export interface CreateCrOptions {
+  /** Người tạo chỉ được một CR mở: có CR chưa xong ⇒ `409 CR_OWN_OPEN`. Đường người dùng tạo CR bật; lô hệ thống tạo thay họ thì không. */
+  enforceOwnOpen?: boolean
+  /** Phần chỉ server đặt (không có trong body HTTP). FLF-449: CR từ danh sách rút mang chỗ đã tra (`seed.targets`). */
+  seed?: CrSeed | null
+  /** FLF-449: câu hỏi / câu trả lời của thẻ hỏi. */
+  clarifications?: CrClarification[]
+}
+
+/** FLF-449: tên cũ của phần tạo CR chỉ server đặt — gộp vào `CreateCrOptions`. */
+export type CreateCrInternal = CreateCrOptions
+
+export const createCr = async (projectId: string, userId: string, body: CreateCrInput, options: CreateCrOptions = {}): Promise<IChangeRequest> => {
+  const internal = options
+  const record = await spineRepository.get(projectId)
   // FLF-330 C-7: gói đang chờ Lead ⇒ bản nháp khoá, không mở CR mới
-  assertPackageNotPending((await spineRepository.get(projectId))?.baseline_submission)
+  assertPackageNotPending(record?.baseline_submission)
   const imported = await latestImport(projectId)
   const version = await latestDocVersion(projectId)
   if (!imported || !hasBaseline(imported.status) || !version) {
     throw new Mode1Error("CR_REQUIRES_BASELINE", "Chưa có bản gốc của tài liệu - hoàn tất nhập tài liệu trước khi tạo change request")
   }
+  if (options.enforceOwnOpen) await assertNoOwnOpenCr(projectId, userId)
+  // FLF-445: kiểm nhóm cờ trước khi lấy số CR (lỗi thì không tốn mã CR)
+  if (body.flag_ids?.length && !record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
+  const fromFlags = body.flag_ids?.length && record ? seedFromFlags(stripRecord(record), body.flag_ids) : null
   const counter = await CrCounter.findOneAndUpdate({ projectId }, { $inc: { seq: 1 } }, { upsert: true, returnDocument: "after" })
   const cr = await ChangeRequest.create({
     projectId,
@@ -231,7 +316,9 @@ export const createCr = async (projectId: string, userId: string, body: CreateCh
     description: body.description,
     source: body.source,
     requester: body.requester,
-    seed: body.preview_id ? seedFromPreview(projectId, userId, body.preview_id) : null,
+    seed: internal.seed ?? mergeSeeds(body.preview_id ? seedFromPreview(projectId, userId, body.preview_id) : null, fromFlags?.seed ?? null),
+    clarifications: internal.clarifications ?? [],
+    flag_ids: fromFlags?.flagIds ?? [],
     materials: (body.materials ?? []).map((m, i) => ({ ...clipMaterialText(m.text), material_id: formatMaterialId(i + 1), kind: "text", name: m.name, round: 0, added_at: new Date() })),
     status: "draft",
     base_doc_version: version.version,
@@ -283,6 +370,11 @@ export const submitCr = async (cr: IChangeRequest, userId: string): Promise<void
   const record = await spineRepository.get(String(cr.projectId))
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   assertPackageNotPending(record.baseline_submission)
+  // BF §3.2 C-4: AI đã cảnh báo mà BA chưa chọn "Vẫn làm" hay bỏ thì chưa xác nhận được
+  const warned = (await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id, warning: { $ne: null } })).filter(hasPendingWarning).map((l) => l.location_id)
+  if (warned.length) {
+    throw new ApiError(409, `Còn ${warned.length} chỗ AI đã cảnh báo - chọn "Vẫn làm" hoặc bỏ chỗ đó trước khi xác nhận.`, "CR_WARNING_PENDING", { location_ids: warned })
+  }
 
   // FLF-375 — "Hai người sửa cùng lúc": kiểm lại từng chỗ trên nội dung hiện tại trước khi ghi
   const check = await checkBeforeWrite(cr, await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }), stripRecord(record))
@@ -295,6 +387,22 @@ export const submitCr = async (cr: IChangeRequest, userId: string): Promise<void
     // Mọi chỗ đã được người khác sửa giống hệt đề xuất ⇒ đóng, không ghi
     cr.closed_reason = "Mọi chỗ của change request đã được người khác sửa giống đề xuất - không còn gì để ghi"
     await transitionCr(cr, "cancelled")
+    return
+  }
+
+  // C-6 kiểm lại đủ: Spine có thể đã đổi từ lúc kiểm C-5 (CR khác ghi trước, sửa ở chỗ khác) ⇒ chạy khô + so cờ đỏ trước / sau
+  // trên nội dung hiện tại. Có lỗi mới (trừ lỗi BA đã giữ theo ý mình) ⇒ về "Cần bạn quyết", không ghi gì.
+  const locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id })
+  const again = await recheckBeforeWrite(cr, locations, stripRecord(record))
+  if (again.size) {
+    const at = new Date()
+    for (const l of locations) {
+      const vs = again.get(l.location_id)
+      if (!vs) continue
+      l.verify = { code_ok: false, violations: vs, ai_flags: l.verify?.ai_flags ?? [], at }
+      await l.save()
+    }
+    await transitionCr(cr, "manual_fix")
     return
   }
 

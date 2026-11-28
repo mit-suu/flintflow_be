@@ -140,6 +140,12 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
           "type": "heading",
         },
         {
+          "item_entity_paths": [
+            "business_rules[id=BR01]",
+            "business_rules[id=BR02]",
+            "business_rules[id=BR03]",
+            "business_rules[id=BR04]",
+          ],
           "items": [
             [
               {
@@ -170,6 +176,13 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
           "type": "heading",
         },
         {
+          "item_entity_paths": [
+            "actors[id=A05]",
+            "actors[id=A06]",
+            "actors[id=A07]",
+            "actors[id=A08]",
+            "actors[id=A09]",
+          ],
           "items": [
             [
               {
@@ -243,6 +256,17 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
                 "text": "Description",
               },
             ],
+          ],
+          "row_entity_paths": [
+            "actors[id=A01]",
+            "actors[id=A02]",
+            "actors[id=A03]",
+            "actors[id=A04]",
+            "actors[id=A05]",
+            "actors[id=A06]",
+            "actors[id=A07]",
+            "actors[id=A08]",
+            "actors[id=A09]",
           ],
           "rows": [
             [
@@ -510,6 +534,32 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
                 "text": "Extends",
               },
             ],
+          ],
+          "row_entity_paths": [
+            "use_cases[id=UC01]",
+            "use_cases[id=UC02]",
+            "use_cases[id=UC03]",
+            "use_cases[id=UC04]",
+            "use_cases[id=UC05]",
+            "use_cases[id=UC24]",
+            "use_cases[id=UC06]",
+            "use_cases[id=UC07]",
+            "use_cases[id=UC08]",
+            "use_cases[id=UC09]",
+            "use_cases[id=UC10]",
+            "use_cases[id=UC11]",
+            "use_cases[id=UC12]",
+            "use_cases[id=UC23]",
+            "use_cases[id=UC13]",
+            "use_cases[id=UC14]",
+            "use_cases[id=UC15]",
+            "use_cases[id=UC16]",
+            "use_cases[id=UC17]",
+            "use_cases[id=UC18]",
+            "use_cases[id=UC19]",
+            "use_cases[id=UC20]",
+            "use_cases[id=UC21]",
+            "use_cases[id=UC22]",
           ],
           "rows": [
             [
@@ -1348,6 +1398,27 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
               },
             ],
           ],
+          "row_entity_paths": [
+            "screens[id=S01]",
+            "screens[id=S02]",
+            "screens[id=S03]",
+            "screens[id=S04]",
+            "screens[id=S05]",
+            "screens[id=S06]",
+            "screens[id=S07]",
+            "screens[id=S08]",
+            "screens[id=S09]",
+            "screens[id=S10]",
+            "screens[id=S11]",
+            "screens[id=S12]",
+            "screens[id=S13]",
+            "screens[id=S14]",
+            "screens[id=S15]",
+            "screens[id=S16]",
+            "screens[id=S17]",
+            "screens[id=S18]",
+            "screens[id=S19]",
+          ],
           "rows": [
             [
               [
@@ -1712,6 +1783,27 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
                 "text": "Guest",
               },
             ],
+          ],
+          "row_entity_paths": [
+            "screens[id=S01]",
+            "screens[id=S02]",
+            "screens[id=S03]",
+            "screens[id=S04]",
+            "screens[id=S05]",
+            "screens[id=S06]",
+            "screens[id=S07]",
+            "screens[id=S08]",
+            "screens[id=S09]",
+            "screens[id=S10]",
+            "screens[id=S11]",
+            "screens[id=S12]",
+            "screens[id=S13]",
+            "screens[id=S14]",
+            "screens[id=S15]",
+            "screens[id=S16]",
+            "screens[id=S17]",
+            "screens[id=S18]",
+            "screens[id=S19]",
           ],
           "rows": [
             [
@@ -2258,6 +2350,14 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
               },
             ],
           ],
+          "row_entity_paths": [
+            "functions[id=FN084]",
+            "functions[id=FN085]",
+            "functions[id=FN086]",
+            "functions[id=FN087]",
+            "functions[id=FN088]",
+            "functions[id=FN089]",
+          ],
           "rows": [
             [
               [
@@ -2396,6 +2496,20 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
                 "text": "Relations",
               },
             ],
+          ],
+          "row_entity_paths": [
+            "entities[id=E01]",
+            "entities[id=E02]",
+            "entities[id=E03]",
+            "entities[id=E04]",
+            "entities[id=E05]",
+            "entities[id=E06]",
+            "entities[id=E07]",
+            "entities[id=E08]",
+            "entities[id=E09]",
+            "entities[id=E10]",
+            "entities[id=E11]",
+            "entities[id=E12]",
           ],
           "rows": [
             [
@@ -7028,7 +7142,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
                 "text": "Business rules: ",
               },
               {
-                "text": "Working mode must be one of fast or coaching.",
+                "text": "Working mode must be one of "fast" or "coaching".",
               },
             ],
             [
@@ -18689,6 +18803,10 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
       "awaiting_reaccept": false,
       "blocks": [
         {
+          "item_entity_paths": [
+            "nfrs[id=N01]",
+            "nfrs[id=N02]",
+          ],
           "items": [
             [
               {
@@ -18742,6 +18860,10 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
                 "text": "Priority",
               },
             ],
+          ],
+          "row_entity_paths": [
+            "nfrs[id=N03]",
+            "nfrs[id=N04]",
           ],
           "rows": [
             [
@@ -18824,6 +18946,10 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
               },
             ],
           ],
+          "row_entity_paths": [
+            "nfrs[id=N05]",
+            "nfrs[id=N06]",
+          ],
           "rows": [
             [
               [
@@ -18905,11 +19031,16 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
               },
             ],
           ],
+          "row_entity_paths": [
+            "nfrs[id=N07]",
+            "nfrs[id=N08]",
+            "nfrs[id=N09]",
+          ],
           "rows": [
             [
               [
                 {
-                  "text": "Chat responses start streaming quickly after submission.",
+                  "text": "Chat responses start streaming within 3 seconds of submission.",
                 },
               ],
               [
@@ -19008,6 +19139,10 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
               },
             ],
           ],
+          "row_entity_paths": [
+            "nfrs[id=N10]",
+            "nfrs[id=N11]",
+          ],
           "rows": [
             [
               [
@@ -19074,6 +19209,13 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
       "awaiting_reaccept": false,
       "blocks": [
         {
+          "item_entity_paths": [
+            "business_rules[id=BR05]",
+            "business_rules[id=BR06]",
+            "business_rules[id=BR07]",
+            "business_rules[id=BR08]",
+            "business_rules[id=BR09]",
+          ],
           "items": [
             [
               {
@@ -19126,11 +19268,18 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
               },
             ],
           ],
+          "row_entity_paths": [
+            "common_requirements[id=CR01]",
+            "common_requirements[id=CR02]",
+            "common_requirements[id=CR03]",
+            "common_requirements[id=CR04]",
+            "common_requirements[id=CR05]",
+          ],
           "rows": [
             [
               [
                 {
-                  "text": "pagination",
+                  "text": "Pagination",
                 },
               ],
               [
@@ -19142,7 +19291,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "date_format",
+                  "text": "Date format",
                 },
               ],
               [
@@ -19154,7 +19303,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "error_handling",
+                  "text": "Error handling",
                 },
               ],
               [
@@ -19166,7 +19315,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "audit",
+                  "text": "Audit",
                 },
               ],
               [
@@ -19178,7 +19327,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "session",
+                  "text": "Session",
                 },
               ],
               [
@@ -19227,6 +19376,16 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
                 "text": "Functions",
               },
             ],
+          ],
+          "row_entity_paths": [
+            "messages[id=MSG01]",
+            "messages[id=MSG02]",
+            "messages[id=MSG03]",
+            "messages[id=MSG04]",
+            "messages[id=MSG05]",
+            "messages[id=MSG06]",
+            "messages[id=MSG07]",
+            "messages[id=MSG08]",
           ],
           "rows": [
             [
@@ -19471,11 +19630,18 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
               },
             ],
           ],
+          "row_entity_paths": [
+            "other_requirements[id=OR01]",
+            "other_requirements[id=OR02]",
+            "other_requirements[id=OR03]",
+            "other_requirements[id=OR04]",
+            "other_requirements[id=OR05]",
+          ],
           "rows": [
             [
               [
                 {
-                  "text": "risk",
+                  "text": "Risk",
                 },
               ],
               [
@@ -19487,7 +19653,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "assumption",
+                  "text": "Assumption",
                 },
               ],
               [
@@ -19499,7 +19665,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "open_question",
+                  "text": "Open question",
                 },
               ],
               [
@@ -19511,7 +19677,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "technical_risk",
+                  "text": "Technical risk",
                 },
               ],
               [
@@ -19523,7 +19689,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "technical_risk",
+                  "text": "Technical risk",
                 },
               ],
               [
@@ -19562,6 +19728,24 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
                 "text": "Definition",
               },
             ],
+          ],
+          "row_entity_paths": [
+            "glossary[id=G01]",
+            "glossary[id=G02]",
+            "glossary[id=G03]",
+            "glossary[id=G04]",
+            "glossary[id=G05]",
+            "glossary[id=G06]",
+            "glossary[id=G07]",
+            "glossary[id=G08]",
+            "glossary[id=G09]",
+            "glossary[id=G10]",
+            "glossary[id=G11]",
+            "glossary[id=G12]",
+            "glossary[id=G13]",
+            "glossary[id=G14]",
+            "glossary[id=G15]",
+            "glossary[id=G16]",
           ],
           "rows": [
             [

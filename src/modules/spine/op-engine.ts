@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto"
 import { isDeepStrictEqual } from "node:util"
 import { z } from "zod"
 import * as repository from "./spine.repository.js"
+import { retiredIds } from "./change-log.js"
 import { spineSchema } from "./spine.schema.js"
 import type { Change, Spine, SpineRecord } from "./spine.types.js"
 import {
@@ -41,11 +42,12 @@ import { PathError, isRecord, parentArrayPath, parsePath, resolve, selectorFor, 
 import { checkInvariants } from "./invariants.js"
 import { RemovedIds, planCascade, planFeatureRenumber, planScreenQueueAppend } from "./cascade.js"
 import { planBriefReextract } from "./brief-core.js"
-import { allocateId, allocatesIds, isPlaceholderId, substituteDeep, substitutePlaceholders } from "./id-allocator.js"
+import { allocateId, allocatesIds, isPlaceholderId, substituteDeep, substitutePlaceholders, type RetiredIds } from "./id-allocator.js"
 import { withElementDefaults } from "./element-defaults.js"
 import { normalizeFormFactorAt } from "./form-factor.js"
 import { normalizeDiagramAt } from "./legacy-diagram.js"
 import { normalizeFlowAt } from "./legacy-flow.js"
+import { notifySpineWritten } from "./spine-written-event.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
 export const CHANGE_RANGE_INVALID = "CHANGE_RANGE_INVALID"
@@ -85,6 +87,8 @@ interface WorkState {
   baseline: Spine | null
   /** Id tạm (`$new1`) → id server đã cấp trong lô này (WP-2). */
   placeholders: Map<string, string>
+  /** Mã đã từng bị xoá của dự án (FLF-474) — coi như đã dùng khi cấp mã mới, không chặn op `add` có id tường minh (revert). */
+  retired: RetiredIds
 }
 
 const opError = (rule: RejectRule, path: string, message: string): PathError => new PathError(rule, path, message)
@@ -208,7 +212,7 @@ const withAllocatedId = (state: WorkState, path: string, value: unknown): unknow
 
   const parent = nested ? segments[0].selector : undefined
   const parentId = parent?.kind === "match" ? (parent.pairs.find(([k]) => k === "id")?.[1] ?? null) : null
-  const id = allocateId(state.spine, collection, parentId)
+  const id = allocateId(state.spine, collection, parentId, state.retired)
   if (id === null) return value
   if (isPlaceholderId(current)) state.placeholders.set(current, id)
   return { ...value, id }
@@ -402,7 +406,7 @@ const schemaViolations = (spine: Spine): Violation[] => {
  * Trước đây id tạm chỉ được thay ở op PHÍA SAU op add ⇒ "thêm chức năng mới + gắn vào UC có sẵn" mà model viết op gắn
  * trước bị `$new1` không trỏ tới phần tử. Chỉ chạy khi lô có id tạm; lô thay gốc (clone / migrate) giữ cách cũ.
  */
-const preallocateIds = (spine: Spine, ops: readonly Op[], placeholders: Map<string, string>): Map<number, string> => {
+const preallocateIds = (spine: Spine, ops: readonly Op[], placeholders: Map<string, string>, retired: RetiredIds): Map<number, string> => {
   const out = new Map<number, string>()
   if (ops.some((op) => op.op === "clone" || op.op === "migrate")) return out
   if (!ops.some((op) => op.op === "add" && isRecord(op.value) && isPlaceholderId(op.value.id))) return out
@@ -425,7 +429,7 @@ const preallocateIds = (spine: Spine, ops: readonly Op[], placeholders: Map<stri
     if (!allocatesIds(collection)) return
     const list = (spine as unknown as Record<string, unknown>)[collection]
     const view = { ...spine, [collection]: [...(Array.isArray(list) ? list : []), ...(reserved[collection] ?? [])] } as Spine
-    const id = allocateId(view, collection)
+    const id = allocateId(view, collection, null, retired)
     if (id === null) return
     ;(reserved[collection] ??= []).push({ id })
     out.set(i, id)
@@ -438,7 +442,11 @@ export interface PlanOptions {
   /** Seq của change đầu tiên (repository.nextSeq). */
   startSeq: number
   now?: Date
+  /** Mã đã từng bị xoá của dự án (FLF-474, `spine/change-log.ts` `retiredIds`) — coi như đã dùng khi cấp mã mới. */
+  retired?: RetiredIds
 }
+
+const NO_RETIRED: RetiredIds = new Map()
 
 /**
  * Áp lô lên bản sao của `spine` — hàm thuần, không đụng DB, không đổi `spine_version`.
@@ -447,10 +455,11 @@ export interface PlanOptions {
 export const planTransaction = (spine: Spine, txn: Transaction, options: PlanOptions): PlanResult & { txn: string } => {
   const txnId = txn.txn ?? randomUUID()
   const before = clone(spine)
-  const state: WorkState = { spine: clone(spine), removed: new RemovedIds(), ops: [], drafts: [], baseline: null, placeholders: new Map() }
+  const retired = options.retired ?? NO_RETIRED
+  const state: WorkState = { spine: clone(spine), removed: new RemovedIds(), ops: [], drafts: [], baseline: null, placeholders: new Map(), retired }
 
   // P08: id tạm cấp trước cho cả lô ⇒ op đứng TRƯỚC op add của `$new1` (vd gắn chức năng mới vào UC có sẵn) cũng được thay
-  const preassigned = preallocateIds(state.spine, txn.ops, state.placeholders)
+  const preassigned = preallocateIds(state.spine, txn.ops, state.placeholders, retired)
 
   const run = (input: Op, index?: number) => {
     const id = index === undefined ? undefined : preassigned.get(index)
@@ -500,7 +509,7 @@ export const planTransaction = (spine: Spine, txn: Transaction, options: PlanOpt
     for (const op of planFeatureRenumber(state.spine, state.removed)) run(op)
     for (const op of planScreenQueueAppend(state.spine, before)) run(op)
     // migrate nạp lại cả Spine (không phải một lần sửa Brief) ⇒ không đánh dấu S-1.1
-    if (!txn.ops.some((op) => op.op === "migrate")) for (const op of planBriefReextract(state.spine, before)) run(op)
+    if (!txn.ops.some((op) => op.op === "migrate")) for (const op of planBriefReextract(state.spine, before, txn.step_id)) run(op)
     invariantViolations = checkInvariants(state.spine, state.baseline ?? before)
   } catch (err) {
     // BUG-04 (lớp phòng thủ): dữ liệu sai hình lọt tới cascade/bất biến ⇒ schema báo lỗi cho model, không 501
@@ -617,7 +626,7 @@ export interface RevertOptions {
 /** Revert thuần: áp nghịch đảo `changes` theo thứ tự seq giảm dần, kiểm bất biến cuối lô. */
 export const planRevert = (spine: Spine, changes: Change[], options: RevertOptions): PlanResult & { txn: string } => {
   const before = clone(spine)
-  const state: WorkState = { spine: clone(spine), removed: new RemovedIds(), ops: [], drafts: [], baseline: null, placeholders: new Map() }
+  const state: WorkState = { spine: clone(spine), removed: new RemovedIds(), ops: [], drafts: [], baseline: null, placeholders: new Map(), retired: NO_RETIRED }
   const ordered = [...changes].sort((a, b) => b.seq - a.seq)
 
   for (const change of ordered) {
@@ -685,12 +694,31 @@ const parseTransaction = (txn: Transaction): Transaction => {
   return parsed.data
 }
 
+/**
+ * FLF-474: lô có op `add` cấp id vào collection do allocator quản lý thì mới cần tải tập mã đã xoá (tốn một
+ * truy vấn lịch sử `changes`, có cache tăng dần) — lô chỉ `set`/`remove` hoặc `add` có id tường minh (vd revert)
+ * không cần.
+ */
+const needsRetired = (ops: readonly Op[]): boolean =>
+  ops.some((op) => {
+    if (op.op !== "add") return false
+    let segments: ReturnType<typeof parsePath>
+    try {
+      segments = parsePath(op.path)
+    } catch {
+      return false
+    }
+    const last = segments[segments.length - 1]
+    return last.selector?.kind === "append" && allocatesIds(last.key)
+  })
+
 /** Áp một transaction và ghi DB. Xem mô tả đầu file. */
 export const applyTransaction = async (projectId: string, txn: Transaction): Promise<ApplyResult> => {
   const input = parseTransaction(txn)
   const record = await loadForWrite(projectId, input.base_version)
   const startSeq = await repository.nextSeq(projectId)
-  const plan = planTransaction(stripRecord(record), input, { startSeq })
+  const retired = needsRetired(input.ops) ? await retiredIds(projectId) : undefined
+  const plan = planTransaction(stripRecord(record), input, { startSeq, retired })
 
   // Mọi op trùng giá trị hiện tại: không ghi, không tăng version (tránh làm waiver hết hạn / section stale giả)
   if (plan.changes.length === 0) return { spine: record, changes: [], txn: null, spine_version: record.spine_version }
@@ -700,6 +728,8 @@ export const applyTransaction = async (projectId: string, txn: Transaction): Pro
     baseVersion: input.base_version,
     changes: plan.changes
   })
+  // Báo tab khác đang mở dự án (SSE); không await, lỗi không ảnh hưởng lệnh ghi
+  notifySpineWritten(projectId, saved.spine, saved.changes)
   return { spine: saved.spine, changes: saved.changes, txn: plan.txn, spine_version: saved.spine.spine_version }
 }
 
@@ -718,7 +748,8 @@ export const previewTransaction = async (
   const txnId = input.txn ?? randomUUID()
 
   try {
-    const plan = planTransaction(stripRecord(record), { ...input, txn: txnId }, { startSeq: 1 })
+    const retired = needsRetired(input.ops) ? await retiredIds(projectId) : undefined
+    const plan = planTransaction(stripRecord(record), { ...input, txn: txnId }, { startSeq: 1, retired })
     return {
       ok: true,
       txn: txnId,
@@ -782,5 +813,6 @@ const saveRevert = async (projectId: string, record: SpineRecord, changes: Chang
     baseVersion: record.spine_version,
     changes: plan.changes
   })
+  notifySpineWritten(projectId, saved.spine, saved.changes)
   return { spine: saved.spine, changes: saved.changes, txn: plan.txn, spine_version: saved.spine.spine_version }
 }

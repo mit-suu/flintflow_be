@@ -1,7 +1,7 @@
 ---
 skill_id: appendix-content
 kind: content
-version: 0.4.0
+version: 0.5.0
 description: "S-7 appendix - detail business rules, common requirements, messages, other requirements (mostly derived)"
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -52,6 +52,23 @@ projection; each business validation becomes, or joins, a `business_rules[]` row
   already existed. The traceability edge you are responsible for points from the rule to the validation.
 - If a business validation contradicts a high-tier rule, do not silently pick a side: write the detail row
   as stated in §3 and add an `assumptions[]` entry naming the conflict for S-8.4 to resolve.
+- **Large project: the projection may hold only part of the functions (FLF-470).** A later batch sees
+  `business_rules[]` the earlier batch already wrote (not filtered out of the projection). If one of its
+  validations states the same policy as an existing `tier: "detail"` row, `set
+  business_rules[id=BRx].source_validation_ids` to the old list plus the new validation id - do not add a
+  second row for the same policy, do not rewrite or remove a row whose `source_validation_ids` point to a
+  function outside this batch.
+
+## S-7.1/S-7.3 across batches
+
+A project with many functions splits across several Draft turns (`functionBatches` in
+`step-runner.service.ts`); each turn only sees a slice of `functions[]`, never all of them at once.
+
+- Merge against what earlier batches already wrote, by reading `business_rules[]` / `messages[]` in the
+  current projection (they are not filtered by batch) - never duplicate a row for a policy or a message
+  text that is already there with a different `source_validation_ids` / `function_ids`.
+- Only `add`/`set` on the rows this batch's functions are the source for. A row whose
+  `source_validation_ids` / `function_ids` names only functions outside this batch is not yours to touch.
 
 ## S-7.2 - Common requirements (`fixed:5.2`)
 
@@ -84,6 +101,10 @@ money-moving actions). Each becomes `{id, code, type, context, text, function_id
 - **Merge by message, not by function.** The same sentence raised by six functions is ONE row with six
   ids in `function_ids`; that array is the back-reference to §3.
 - Every id in `function_ids` must exist after this batch.
+- **Large project, several batches (FLF-470): see "S-7.1/S-7.3 across batches" above.** A message an
+  earlier batch already wrote shows up in this batch's projection too - if a function here raises the
+  same text, `set messages[id=Mx].function_ids` to the old list plus this function's id, don't add a
+  second row.
 
 ## S-7.4 - Other requirements (`fixed:5.4`)
 
@@ -103,6 +124,7 @@ already sweeps `assumptions[]`. Keep this section to things a stakeholder must d
 4. English values, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).
 5. Still unanswered: derive the most reasonable row plus an `assumptions[]` entry
    (`status: "unconfirmed"`), `draft-to-ops` rule 10.
+6. Every business rule (S-7.1 only) row you add carries `source_ref`: a short English note on where it comes from (the brief, a user answer, a reference document and its passage, or who asked). Never invent a source; none known ⇒ "User request in this step".
 
 ## Example (S-7.1 merging one policy enforced twice, then S-7.3)
 
